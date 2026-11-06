@@ -462,6 +462,28 @@ button { cursor: pointer; background: none; border: none; padding: 0; }
 
 .empty-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
+/* Brush cursor */
+.brush-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(242, 238, 228, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+  will-change: transform, width, height;
+}
+.brush-cursor.erasing {
+  border-color: rgba(217, 165, 95, 0.95);
+  border-style: dashed;
+}
+
+.stage-frame.brushing { cursor: none; }
+.stage-frame.brushing #view { cursor: none; }
+
 /* Drag overlay */
 .drop-overlay {
   position: absolute;
@@ -784,6 +806,47 @@ input[type="range"]::-moz-range-thumb {
 }
 .switch[aria-checked="true"]::after { transform: translateX(13px); background: var(--amber); }
 
+/* Curve editor */
+.curve-wrap {
+  margin: 6px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0a0a0b;
+  overflow: hidden;
+  transition: opacity 0.2s var(--ease);
+}
+.group:has(.toggle-row .switch[aria-checked="false"]) .curve-wrap {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.curve-canvas {
+  display: block;
+  width: 100%;
+  height: 132px;
+  touch-action: none;
+}
+
+.curve-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px 6px;
+  border-top: 1px solid var(--line);
+}
+
+.curve-hint {
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: var(--paper-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.curve-reset { flex-shrink: 0; font-size: 10px; }
+
 /* Segmented control */
 .segmented {
   display: flex;
@@ -984,6 +1047,151 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 .shortcut-list dd { margin: 0; font-size: 11.5px; color: var(--paper-mute); text-align: right; }
+
+/* ============================================================
+   Batch dialog
+   ============================================================ */
+
+.modal-card-wide { width: min(720px, 100%); }
+
+.batch-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.batch-recipe {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--paper-faint);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.batch-recipe strong { color: var(--amber); font-weight: 400; }
+
+.batch-drop {
+  margin: 13px 0 0;
+  padding: 14px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--paper-faint);
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.batch-drop.active {
+  border-color: var(--amber-line);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.batch-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 224px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.batch-list:empty { display: none; }
+
+.batch-item {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: rgba(0, 0, 0, 0.22);
+}
+.batch-item[data-status="done"] { border-color: rgba(95, 156, 106, 0.28); }
+.batch-item[data-status="error"] { border-color: rgba(200, 96, 86, 0.34); }
+.batch-item[data-status="working"] { border-color: var(--amber-line); }
+
+.batch-item-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 3px;
+  object-fit: cover;
+  background: #101012;
+  filter: grayscale(1);
+}
+
+.batch-item-name {
+  font-size: 11.5px;
+  color: var(--paper-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.batch-item-status {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+  white-space: nowrap;
+}
+.batch-item[data-status="done"] .batch-item-status { color: #7fb98a; }
+.batch-item[data-status="error"] .batch-item-status { color: #d08179; }
+.batch-item[data-status="working"] .batch-item-status { color: var(--amber); }
+
+.batch-item-remove {
+  color: var(--paper-faint);
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 3px;
+}
+.batch-item-remove:hover { background: var(--ink-300); color: var(--paper); }
+
+.batch-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.batch-progress { margin-top: 14px; display: flex; align-items: center; gap: 11px; }
+
+.batch-bar {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(234, 229, 219, 0.11);
+  overflow: hidden;
+}
+.batch-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--amber);
+  transition: width 0.18s var(--ease);
+}
+
+.batch-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--paper-faint);
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .batch-controls { grid-template-columns: 1fr; }
+  .batch-recipe { display: none; }
+}
 
 /* ============================================================
    Toasts

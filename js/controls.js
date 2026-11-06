@@ -5,6 +5,15 @@
  * its range, its default and its reset behaviour live in one place.
  */
 
+/**
+ * Default control points for the manual curve, in 0…1 space.
+ * With no curve enabled this is an exact identity, so the darkroom looks
+ * identical whether or not the curve stage is in play.
+ */
+export const CURVE_POINTS = [
+  [0, 0], [0.25, 0.25], [0.5, 0.5], [0.75, 0.75], [1, 1],
+];
+
 export const GROUPS = [
   {
     id: 'tone',
@@ -17,6 +26,8 @@ export const GROUPS = [
       { id: 'shadows', type: 'slider', label: 'Shadows', min: -100, max: 100, step: 1, def: 0 },
       { id: 'whites', type: 'slider', label: 'Whites', min: -100, max: 100, step: 1, def: 0 },
       { id: 'blacks', type: 'slider', label: 'Blacks', min: -100, max: 100, step: 1, def: 0 },
+      { id: 'curveOn', type: 'toggle', label: 'Manual curve', def: false },
+      { id: 'curvePoints', type: 'curve', label: 'Tone curve' },
     ],
   },
   {
@@ -59,6 +70,16 @@ export const GROUPS = [
     ],
   },
   {
+    id: 'local',
+    title: 'Local dodge & burn',
+    open: false,
+    controls: [
+      { id: 'maskAmount', type: 'slider', label: 'Strength', min: -100, max: 100, step: 1, def: 0 },
+      { id: 'maskSize', type: 'slider', label: 'Brush size', min: 2, max: 40, step: 1, def: 12 },
+      { id: 'maskNote', type: 'note', label: 'Turn on Brush mode (B), paint an area, then pull Strength positive to dodge or negative to burn.' },
+    ],
+  },
+  {
     id: 'frame',
     title: 'Frame & finish',
     open: false,
@@ -69,7 +90,9 @@ export const GROUPS = [
 ];
 
 export const ALL_CONTROLS = GROUPS.flatMap((g) =>
-  g.controls.filter((c) => c.type !== 'note').map((c) => ({ ...c, group: g.id }))
+  g.controls
+    .filter((c) => c.type !== 'note')
+    .map((c) => ({ ...c, group: g.id, def: c.def !== undefined ? c.def : CURVE_POINTS }))
 );
 
 export const CONTROL_BY_ID = Object.fromEntries(ALL_CONTROLS.map((c) => [c.id, c]));
@@ -79,6 +102,8 @@ export const DEFAULTS = Object.fromEntries(ALL_CONTROLS.map((c) => [c.id, c.def]
 /** Format a value for display. */
 export function formatValue(control, value) {
   if (control.type === 'segmented') return value;
+  if (control.type === 'toggle') return value ? 'on' : 'off';
+  if (control.type === 'curve') return '';
   const digits = control.digits ?? 0;
   const n = Number(value);
   const text = n.toFixed(digits);

@@ -5,8 +5,9 @@
  * parameters and get told when the user changes one.
  */
 
-import { GROUPS, formatValue, valueRatio } from './controls.js';
+import { GROUPS, formatValue, valueRatio, CURVE_POINTS } from './controls.js';
 import { TONES } from './presets.js';
+import { curveInterpolator } from './engine.js';
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -135,6 +136,14 @@ export function buildPanel(container, handlers) {
         const built = buildSegmented(control, handlers);
         rows.set(control.id, { ...built, control, group: group.id });
         inner.append(built.row);
+      } else if (control.type === 'toggle') {
+        const built = buildToggle(control, handlers);
+        rows.set(control.id, { ...built, control, group: group.id });
+        inner.append(built.row);
+      } else if (control.type === 'curve') {
+        const built = buildCurve(control, handlers);
+        rows.set(control.id, { ...built, control, group: group.id });
+        inner.append(built.row);
       }
     }
 
@@ -161,6 +170,12 @@ export function buildPanel(container, handlers) {
           }
           entry.input.style.setProperty('--fill', `${(valueRatio(entry.control, value) * 100).toFixed(2)}%`);
           entry.valueEl.textContent = formatValue(entry.control, value);
+          entry.row.classList.toggle('is-modified', isModified);
+        } else if (entry.control.type === 'toggle') {
+          entry.switch.setAttribute('aria-checked', String(!!value));
+          entry.row.classList.toggle('is-modified', isModified);
+        } else if (entry.control.type === 'curve') {
+          entry.setPoints(value);
           entry.row.classList.toggle('is-modified', isModified);
         } else {
           for (const button of entry.buttons) {
@@ -241,6 +256,250 @@ function buildSegmented(control, handlers) {
   ]);
 
   return { row, buttons };
+}
+
+function buildToggle(control, handlers) {
+  const switchEl = el('button', {
+    class: 'switch',
+    type: 'button',
+    role: 'switch',
+    'aria-checked': 'false',
+    'aria-label': control.label,
+  });
+
+  const row = el('div', { class: 'toggle-row' }, [
+    el('span', { class: 'toggle-label', text: control.label }),
+    switchEl,
+  ]);
+
+  const flip = () => {
+    const next = switchEl.getAttribute('aria-checked') !== 'true';
+    switchEl.setAttribute('aria-checked', String(next));
+    handlers.onChange(control.id, next, { commit: true });
+  };
+
+  switchEl.addEventListener('click', flip);
+  row.addEventListener('click', (event) => {
+    if (event.target !== switchEl) flip();
+  });
+
+  return { row, switch: switchEl };
+}
+
+/**
+ * Interactive tone curve. Drag a point to reshape, click empty space to add
+ * a point, right-click (or Alt-click) a point to remove it. The curve is
+ * evaluated with the same monotone spline the engine uses, so what you see
+ * here is exactly what the print gets.
+ */
+function buildCurve(control, handlers) {
+  const CURVE_W = 260;
+  const CURVE_H = 160;
+  const canvas = el('canvas', {
+    class: 'curve-canvas',
+    width: CURVE_W,
+    height: CURVE_H,
+    role: 'application',
+    'aria-label': 'Tone curve — drag points to reshape',
+    tabindex: '0',
+  });
+
+  const hint = el('div', { class: 'curve-hint', text: 'Click to add · alt-click to remove · drag to shape' });
+  const resetBtn = el('button', { class: 'link-btn curve-reset', type: 'button', text: 'Reset curve' });
+
+  const row = el('div', { class: 'curve-wrap' }, [canvas, el('div', { class: 'curve-foot' }, [hint, resetBtn])]);
+
+  let points = CURVE_POINTS.map((p) => [p[0], p[1]]);
+  let dragIndex = -1;
+  let hoverIndex = -1;
+
+  const ctx = canvas.getContext('2d');
+
+  function draw() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (canvas.width !== CURVE_W * dpr) {
+      canvas.width = CURVE_W * dpr;
+      canvas.height = CURVE_H * dpr;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, CURVE_W, CURVE_H);
+
+    // Plate
+    ctx.fillStyle = '#0a0a0b';
+    ctx.fillRect(0, 0, CURVE_W, CURVE_H);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(234,229,219,0.07)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      const gx = (CURVE_W / 4) * i;
+      const gy = (CURVE_H / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(gx, 0); ctx.lineTo(gx, CURVE_H);
+      ctx.moveTo(0, gy); ctx.lineTo(CURVE_W, gy);
+      ctx.stroke();
+    }
+
+    // Identity reference
+    ctx.strokeStyle = 'rgba(234,229,219,0.12)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, CURVE_H);
+    ctx.lineTo(CURVE_W, 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // The curve itself
+    const evalCurve = curveInterpolator(points);
+    ctx.beginPath();
+    for (let i = 0; i <= CURVE_W; i++) {
+      const x = i / CURVE_W;
+      const y = Math.min(1, Math.max(0, evalCurve(x)));
+      const px = x * CURVE_W;
+      const py = CURVE_H - y * CURVE_H;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = '#d9a55f';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    // Fill under the curve
+    ctx.lineTo(CURVE_W, CURVE_H);
+    ctx.lineTo(0, CURVE_H);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(217,165,95,0.08)';
+    ctx.fill();
+
+    // Handles
+    points.forEach(([x, y], i) => {
+      const px = x * CURVE_W;
+      const py = CURVE_H - y * CURVE_H;
+      const active = i === dragIndex || i === hoverIndex;
+      ctx.beginPath();
+      ctx.arc(px, py, active ? 5 : 3.6, 0, Math.PI * 2);
+      ctx.fillStyle = active ? '#f2eee4' : '#d9a55f';
+      ctx.fill();
+      ctx.strokeStyle = '#0a0a0b';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    });
+  }
+
+  function toLocal(event) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / (rect.width || CURVE_W);
+    const y = 1 - (event.clientY - rect.top) / (rect.height || CURVE_H);
+    return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+  }
+
+  function nearest(event, tolerance = 0.055) {
+    const rect = canvas.getBoundingClientRect();
+    const [mx, my] = toLocal(event);
+    let best = -1;
+    let bestDist = Infinity;
+    points.forEach(([x, y], i) => {
+      const dx = (x - mx) * ((rect.width || CURVE_W) / CURVE_W);
+      const dy = (y - my) * ((rect.height || CURVE_H) / CURVE_H);
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    });
+    return bestDist <= tolerance ? best : -1;
+  }
+
+  function emit(commit) {
+    points.sort((a, b) => a[0] - b[0]);
+    handlers.onChange(control.id, points.map((p) => [p[0], p[1]]), { commit });
+  }
+
+  canvas.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    const hit = nearest(event);
+
+    if (hit >= 0 && (event.altKey || event.button === 2)) {
+      // Endpoints stay put so the curve always spans the full range.
+      if (hit !== 0 && hit !== points.length - 1) {
+        points.splice(hit, 1);
+        dragIndex = -1;
+        draw();
+        emit(true);
+      }
+      return;
+    }
+
+    if (hit >= 0) {
+      dragIndex = hit;
+    } else {
+      const [x, y] = toLocal(event);
+      points.push([x, y]);
+      points.sort((a, b) => a[0] - b[0]);
+      dragIndex = points.findIndex((p) => p[0] === x && p[1] === y);
+    }
+    draw();
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (dragIndex < 0) {
+      const hit = nearest(event);
+      if (hit !== hoverIndex) {
+        hoverIndex = hit;
+        canvas.style.cursor = hit >= 0 ? 'grab' : 'crosshair';
+        draw();
+      }
+      return;
+    }
+
+    const [rawX, rawY] = toLocal(event);
+    const isFirst = dragIndex === 0;
+    const isLast = dragIndex === points.length - 1;
+    const minGap = 0.02;
+
+    // Endpoints are locked to the edges horizontally, free vertically.
+    const x = isFirst ? 0 : isLast ? 1
+      : Math.min(points[dragIndex + 1][0] - minGap, Math.max(points[dragIndex - 1][0] + minGap, rawX));
+
+    points[dragIndex] = [x, rawY];
+    draw();
+    handlers.onChange(control.id, points.map((p) => [p[0], p[1]]), { commit: false });
+  });
+
+  function endDrag() {
+    if (dragIndex < 0) return;
+    dragIndex = -1;
+    canvas.style.cursor = 'crosshair';
+    draw();
+    emit(true);
+  }
+
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', () => {
+    if (dragIndex < 0 && hoverIndex !== -1) { hoverIndex = -1; draw(); }
+  });
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  resetBtn.addEventListener('click', () => {
+    points = CURVE_POINTS.map((p) => [p[0], p[1]]);
+    draw();
+    emit(true);
+  });
+
+  canvas.style.cursor = 'crosshair';
+  draw();
+
+  return {
+    row,
+    canvas,
+    setPoints(value) {
+      if (!Array.isArray(value) || !value.length) return;
+      // Ignore echoes of the array we just emitted.
+      if (dragIndex >= 0) return;
+      if (value.length === points.length && value.every((p, i) => Math.abs(p[0] - points[i][0]) < 1e-6 && Math.abs(p[1] - points[i][1]) < 1e-6)) return;
+      points = value.map((p) => [p[0], p[1]]);
+      draw();
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */

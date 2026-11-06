@@ -41,6 +41,10 @@
       <span>Open</span>
     </button>
     <button class="btn" id="sampleBtn" type="button" title="Load the sample negative">Sample</button>
+    <button class="btn" id="batchBtn" type="button" title="Batch develop many photos (Shift+B)">
+      <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.6" y="5.4" width="9.2" height="9.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 3.6h9.6a1.4 1.4 0 0 1 1.4 1.4V15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <span>Batch</span>
+    </button>
     <button class="btn" id="resetBtn" type="button" title="Reset all adjustments (R)">Reset</button>
     <button class="btn btn-primary" id="exportBtn" type="button" title="Export (E)">
       <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10m0 0l-3.6-3.6M10 13l3.6-3.6M3.4 14.6v1.6a1.4 1.4 0 0 0 1.4 1.4h10.4a1.4 1.4 0 0 0 1.4-1.4v-1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -92,6 +96,7 @@
         <span>Release to develop</span>
       </div>
 
+      <div class="brush-cursor" id="brushCursor" aria-hidden="true" hidden></div>
       <div class="stage-badge" id="stageBadge" hidden></div>
     </div>
 
@@ -100,6 +105,13 @@
         <button class="tool" id="compareBtn" type="button" title="Hold to compare with original (\)">
           <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.6" y="3.6" width="14.8" height="12.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 3.6v12.8" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/></svg>
           <span>Compare</span>
+        </button>
+        <button class="tool" id="brushBtn" type="button" aria-pressed="false" title="Brush — local dodge &amp; burn (B)">
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M13.4 3.6a2 2 0 0 1 2.8 2.8l-7 7-3.6.8.8-3.6 7-7Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          <span>Brush</span>
+        </button>
+        <button class="tool icon-only" id="eraseBtn" type="button" aria-pressed="false" aria-label="Erase mask" title="Erase mask (hold Alt)">
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M8.2 16.4H4.6a1 1 0 0 1-.7-.3l-1.2-1.2a1 1 0 0 1 0-1.4l7.6-7.6a1 1 0 0 1 1.4 0l3.4 3.4a1 1 0 0 1 0 1.4l-6.9 6.9M7 9.6l4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <span class="stage-sep" aria-hidden="true"></span>
         <div class="histogram-wrap">
@@ -200,6 +212,69 @@
   </div>
 </div>
 
+<!-- Batch dialog -->
+<div class="modal" id="batchModal" hidden>
+  <div class="modal-scrim" data-close-modal></div>
+  <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="batchTitle">
+    <header class="modal-head">
+      <h2 id="batchTitle">Batch develop</h2>
+      <button class="icon-btn" data-close-modal type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="modal-body">
+      <div class="batch-top">
+        <button class="btn" id="batchAddBtn" type="button">Add photos…</button>
+        <button class="btn" id="batchSampleBtn" type="button">Add samples</button>
+        <button class="link-btn" id="batchClearBtn" type="button">Clear list</button>
+        <span class="batch-recipe" id="batchRecipe">Recipe: —</span>
+      </div>
+
+      <div class="batch-drop" id="batchDrop">
+        <span>Drop photos here to add them to the queue</span>
+      </div>
+
+      <ul class="batch-list" id="batchList" aria-live="polite"></ul>
+
+      <div class="batch-controls">
+        <label class="field">
+          <span class="field-label">Format</span>
+          <select id="batchFormat">
+            <option value="image/jpeg" selected>JPEG</option>
+            <option value="image/png">PNG</option>
+            <option value="image/webp">WebP</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Long edge (px)</span>
+          <select id="batchSize">
+            <option value="0">Full resolution</option>
+            <option value="4096">4096</option>
+            <option value="2560" selected>2560</option>
+            <option value="1920">1920</option>
+            <option value="1280">1280</option>
+          </select>
+        </label>
+        <label class="field" id="batchQualityField">
+          <span class="field-label">Quality <output id="batchQualityValue">92</output></span>
+          <input type="range" id="batchQuality" min="60" max="100" step="1" value="92" />
+        </label>
+      </div>
+
+      <div class="batch-progress" id="batchProgress" hidden>
+        <div class="batch-bar"><span id="batchBarFill"></span></div>
+        <span class="batch-status" id="batchStatus">—</span>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn" id="batchCancelBtn" type="button" hidden>Stop</button>
+      <button class="btn" data-close-modal type="button">Close</button>
+      <button class="btn" id="batchZipBtn" type="button" disabled>Download ZIP</button>
+      <button class="btn btn-primary" id="batchRunBtn" type="button" disabled>Develop all</button>
+    </footer>
+  </div>
+</div>
+
+<input type="file" id="batchInput" accept="image/*" multiple hidden />
+
 <!-- Shortcuts dialog -->
 <div class="modal" id="shortcutsModal" hidden>
   <div class="modal-scrim" data-close-modal></div>
@@ -214,6 +289,9 @@
         <div><dt>E</dt><dd>Export</dd></div>
         <div><dt>R</dt><dd>Reset all adjustments</dd></div>
         <div><dt>\</dt><dd>Hold to compare original</dd></div>
+        <div><dt>B</dt><dd>Toggle brush (local dodge &amp; burn)</dd></div>
+        <div><dt>Alt + drag</dt><dd>Erase the mask</dd></div>
+        <div><dt>[ ]</dt><dd>Brush size down / up</dd></div>
         <div><dt>1 – 9</dt><dd>Pick a film stock</dd></div>
         <div><dt>← →</dt><dd>Previous / next film stock</dd></div>
         <div><dt>+ −</dt><dd>Zoom in / out</dd></div>

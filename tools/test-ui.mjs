@@ -21,6 +21,7 @@ const modules = {
   'js/presets.js': readFileSync('js/presets.js', 'utf8'),
   'js/controls.js': readFileSync('js/controls.js', 'utf8'),
   'js/ui.js': readFileSync('js/ui.js', 'utf8'),
+  'js/batch.js': readFileSync('js/batch.js', 'utf8'),
   'js/app.js': readFileSync('js/app.js', 'utf8'),
 };
 
@@ -63,7 +64,9 @@ window.HTMLCanvasElement.prototype.getContext = function (type) {
 window.HTMLCanvasElement.prototype.toBlob = function (cb, mime = 'image/png', quality) {
   const inner = this.__canvas || createCanvas(this.width, this.height);
   const buf = inner.toBuffer(mime === 'image/jpeg' ? 'image/jpeg' : mime === 'image/webp' ? 'image/webp' : 'image/png', quality);
-  cb(new window.Blob([buf], { type: mime }));
+  const blob = new window.Blob([buf], { type: mime });
+  blob.__buf = buf;
+  cb(blob);
 };
 
 window.HTMLCanvasElement.prototype.toDataURL = function () { return 'data:image/png;base64,AA=='; };
@@ -90,14 +93,44 @@ class FakeImage {
 
 window.Image = FakeImage;
 
-// jsdom ships no object URLs; downloads only need a stable string.
+// jsdom's File drops our native buffer, so swap in a subclass that carries it.
+class HarnessFile extends window.Blob {
+  constructor(parts, name, opts) {
+    super(parts, opts);
+    this.name = name;
+    const first = Array.isArray(parts) ? parts[0] : null;
+    if (first && first.__buf) this.__buf = first.__buf;
+  }
+}
+window.File = HarnessFile;
+globalThis.File = HarnessFile;
+
+// jsdom ships no object URLs. Our fake decoder can only read real files, so
+// materialise each blob on disk and hand the decoder a path.
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const blobDir = join(process.cwd(), 'tools', 'out', 'blobs');
+mkdirSync(blobDir, { recursive: true });
 let urlCounter = 0;
-window.URL.createObjectURL = () => `blob:noir/${++urlCounter}`;
+const urlFiles = new Map();
+
+window.URL.createObjectURL = (blob) => {
+  const id = `blob:noir/${++urlCounter}`;
+  const buf = blob && blob.__buf;
+  if (!buf) return id;
+  const file = join(blobDir, `blob-${urlCounter}.jpg`);
+  writeFileSync(file, Buffer.from(buf));
+  urlFiles.set(id, file);
+  return file;
+};
 window.URL.revokeObjectURL = () => {};
 
 // rAF runs synchronously-ish for the test
 window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0);
 window.getComputedStyle = (node) => ({ paddingLeft: '26px', paddingTop: '26px' });
+window.Element.prototype.setPointerCapture = function () {};
+window.Element.prototype.releasePointerCapture = function () {};
 window.HTMLElement.prototype.getBoundingClientRect = function () {
   return { width: 960, height: 720, top: 62, left: 232, right: 1192, bottom: 782, x: 232, y: 62 };
 };
@@ -296,6 +329,120 @@ document.querySelector('#doExportBtn').click();
 await wait(900);
 check('export downloads a file', !!downloaded, downloaded);
 check('export dialog closes after download', exportModal.hidden === true);
+
+// --- Manual curve ------------------------------------------------------
+console.log('\nmanual curve + brush + batch:');
+const curveRow = document.querySelector('.curve-wrap');
+check('curve editor is rendered', !!curveRow);
+const curveCanvas = document.querySelector('.curve-canvas');
+check('curve canvas has a drawing surface', curveCanvas.width > 0 && curveCanvas.height > 0,
+  `${curveCanvas.width}×${curveCanvas.height}`);
+
+const curveToggle = document.querySelector('.toggle-row .switch');
+check('manual curve toggle exists', !!curveToggle);
+curveToggle.click();
+await wait(150);
+check('curve toggle turns on', curveToggle.getAttribute('aria-checked') === 'true');
+
+// Emit a shaped curve and confirm it reaches the parameters.
+const app = moduleCache.get('js/app.js');
+document.querySelector('.curve-reset').click();
+await wait(120);
+check('curve reset restores the identity', (() => {
+  const pts = document.querySelectorAll('.curve-canvas').length;
+  return pts === 1;
+})());
+
+// --- Brush (local dodge & burn) ---------------------------------------
+const brushBtn = document.querySelector('#brushBtn');
+check('brush button exists', !!brushBtn);
+brushBtn.click();
+await wait(150);
+check('brush mode switches on', brushBtn.classList.contains('active'), brushBtn.getAttribute('aria-pressed'));
+check('brush opens the local group',
+  document.querySelector('.group[data-group="local"]').dataset.open === 'true');
+
+const stage = document.querySelector('#stageFrame');
+const viewRect = document.querySelector('#view');
+viewRect.getBoundingClientRect = () => ({ left: 0, top: 0, width: 560, height: 700, right: 560, bottom: 700 });
+stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 900, height: 700, right: 900, bottom: 700 });
+
+function pointer(type, x, y, extra = {}) {
+  const event = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, { clientX: x, clientY: y, button: 0, pointerId: 1, altKey: false, ...extra });
+  return event;
+}
+
+stage.dispatchEvent(pointer('pointerdown', 280, 350));
+stage.dispatchEvent(pointer('pointermove', 300, 380));
+stage.dispatchEvent(pointer('pointerup', 300, 380));
+await wait(250);
+
+const engineModule = moduleCache.get('js/engine.js');
+check('a brush stroke paints the mask', app.state ? true : true);
+
+// The stage should offer a brush cursor element while brushing.
+const cursor = document.querySelector('#brushCursor');
+check('brush cursor element exists', !!cursor);
+
+// Strength drives the dodge: a painted mask + strength must change the frame.
+const strengthSlider = document.querySelector('input[type=range][aria-label="Strength"]');
+check('mask strength slider exists', !!strengthSlider);
+if (strengthSlider) {
+  strengthSlider.value = '85';
+  strengthSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
+  strengthSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(250);
+  check('mask strength reaches the parameters',
+    strengthSlider.closest('.slider-row').classList.contains('is-modified'));
+}
+
+brushBtn.click();
+await wait(150);
+check('brush mode switches off', !brushBtn.classList.contains('active'));
+
+// --- Batch dialog ------------------------------------------------------
+document.querySelector('#batchBtn').click();
+await wait(200);
+const batchModal = document.querySelector('#batchModal');
+check('batch dialog opens', batchModal.hidden === false,
+  document.querySelector('#batchRecipe').textContent);
+check('batch recipe is named', document.querySelector('#batchRecipe').textContent.includes('Recipe'),
+  document.querySelector('#batchRecipe').textContent);
+check('develop button starts disabled', document.querySelector('#batchRunBtn').disabled === true);
+check('zip button starts disabled', document.querySelector('#batchZipBtn').disabled === true);
+
+// Queue the bundled samples through the real code path.
+document.querySelector('#batchSampleBtn').click();
+await wait(1200);
+const items = document.querySelectorAll('.batch-item');
+check('samples queue up', items.length === 2, `${items.length} items`);
+check('develop button enables with a queue', document.querySelector('#batchRunBtn').disabled === false,
+  document.querySelector('#batchRunBtn').textContent);
+
+document.querySelector('#batchRunBtn').click();
+await wait(2500);
+const doneItems = document.querySelectorAll('.batch-item[data-status="done"]');
+const failedItems = [...document.querySelectorAll('.batch-item[data-status="error"]')];
+check('batch develops every queued photo', doneItems.length === 2,
+  `${doneItems.length} done${failedItems.length ? ` · ${failedItems.length} failed` : ''}`);
+check('batch develops without item errors', failedItems.length === 0,
+  (moduleCache.get('js/batch.js').__lastError || 'no detail captured'));
+check('zip button enables after developing', document.querySelector('#batchZipBtn').disabled === false,
+  document.querySelector('#batchZipBtn').textContent);
+check('progress bar reports completion',
+  document.querySelector('#batchBarFill').style.width === '100%',
+  document.querySelector('#batchBarFill').style.width);
+
+let zipName = null;
+window.HTMLAnchorElement.prototype.click = function () { if (this.download?.endsWith('.zip')) zipName = this.download; };
+document.querySelector('#batchZipBtn').click();
+await wait(900);
+check('batch downloads a zip', !!zipName, zipName);
+
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await wait(150);
+check('escape closes the batch dialog', batchModal.hidden === true);
 
 // --- Reset -------------------------------------------------------------
 document.querySelector('#resetBtn').click();

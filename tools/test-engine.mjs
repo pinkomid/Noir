@@ -17,8 +17,10 @@ globalThis.document = {
   },
 };
 
-const { Darkroom } = await import('../js/engine.js');
+const { Darkroom, curveInterpolator, isIdentityCurve, buildLUT } = await import('../js/engine.js');
 const { paramsFor, PRESETS } = await import('../js/presets.js');
+const { DEFAULTS } = await import('../js/controls.js');
+const { createZip } = await import('../js/batch.js');
 
 // --- Helpers --------------------------------------------------------------
 function stats(ctx, w, h) {
@@ -189,7 +191,125 @@ const fs = stats(fctx, img.width, img.height);
 check('full-resolution export develops', fs.chroma < 2 && fs.max > 200,
   `${img.width}×${img.height} in ${ms}ms, mean=${fs.mean.toFixed(0)}`);
 
-// --- 6. Write visual proofs --------------------------------------------
+// --- 6. Manual curve ----------------------------------------------------
+console.log('\nmanual curve:');
+const identityPts = DEFAULTS.curvePoints;
+check('default curve is an identity', isIdentityCurve(identityPts));
+
+const lvl = curveInterpolator(identityPts);
+const linear = [0, 0.123, 0.5, 0.777, 1].every((x) => Math.abs(lvl(x) - x) < 1e-6);
+check('identity curve maps x → x', linear, `0.5 → ${lvl(0.5).toFixed(4)}`);
+
+// Monotonicity: a curve with steep and flat stretches must never go backwards.
+const steep = [[0, 0], [0.3, 0.6], [0.6, 0.68], [0.85, 0.95], [1, 1]];
+const ev = curveInterpolator(steep);
+let prev = null;
+let monotone = true;
+let jumps = 0;
+for (let i = 0; i <= 4000; i++) {
+  const v = ev(i / 4000);
+  if (prev !== null) {
+    if (v < prev - 1e-9) monotone = false;
+    if (Math.abs(v - prev) > 0.01) jumps++;
+  }
+  prev = v;
+}
+check('spline is monotone (no overshoot)', monotone);
+check('spline has no sudden jumps', jumps === 0, `${jumps} large steps`);
+
+check('curve clamps outside its domain', ev(-1) === 0 && ev(2) === 1);
+
+// The curve must reach the tone pipeline.
+const lifted = developWith({ ...noGrain, curveOn: true, curvePoints: [[0, 0.25], [0.5, 0.6], [1, 1]] }, true).s;
+const flatBase = developWith(noGrain, true).s;
+check('curve lifts the blacks in the LUT', percentile(lifted.hist, W * H, 0.02) > percentile(flatBase.hist, W * H, 0.02) + 10,
+  `p2 base=${percentile(flatBase.hist, W * H, 0.02)} curve=${percentile(lifted.hist, W * H, 0.02)}`);
+
+check('disabled curve is ignored', (() => {
+  const a = buildLUT({ ...noGrain, curveOn: false, curvePoints: [[0, 0.4], [1, 0.6]] });
+  const b = buildLUT(noGrain);
+  return a.every((v, i) => v === b[i]);
+})());
+
+// --- 7. Local dodge & burn mask -----------------------------------------
+console.log('\nlocal mask:');
+const maskEngine = new Darkroom();
+maskEngine.load(img, img.width, img.height);
+check('mask starts empty', maskEngine.maskCoverage() === 0);
+
+// Paint a dab dead centre and confirm coverage registers.
+maskEngine.paintDab({ x: 0.5, y: 0.5, radius: 0.2, strength: 1 });
+const cover = maskEngine.maskCoverage();
+check('painting registers coverage', cover > 0.001 && cover < 0.4, `coverage=${(cover * 100).toFixed(2)}%`);
+
+function developMasked(params) {
+  const c = createCanvas(W, H);
+  const x = c.getContext('2d');
+  maskEngine.develop(x, W, H, params, { source: maskEngine.source });
+  return { c, x, s: stats(x, W, H) };
+}
+
+// Centre patch brightness, with and without the dodge.
+function centreLum(ctx) {
+  const d = ctx.getImageData(W / 2 - 40, H / 2 - 40, 80, 80).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += d[i];
+  return sum / (d.length / 4);
+}
+
+const noMask = developMasked({ ...noGrain, maskAmount: 0 });
+const dodged = developMasked({ ...noGrain, maskAmount: 90 });
+const burned = developMasked({ ...noGrain, maskAmount: -90 });
+
+check('dodge brightens the painted area', centreLum(dodged.x) > centreLum(noMask.x) + 6,
+  `${centreLum(noMask.x).toFixed(0)} → ${centreLum(dodged.x).toFixed(0)}`);
+check('burn deepens the painted area', centreLum(burned.x) < centreLum(noMask.x) - 4,
+  `${centreLum(noMask.x).toFixed(0)} → ${centreLum(burned.x).toFixed(0)}`);
+
+// The dodge must be local: a corner far from the dab should barely move.
+function patchLum(ctx) {
+  const d = ctx.getImageData(4, 4, 60, 60).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += d[i];
+  return sum / (d.length / 4);
+}
+check('dodge stays local', Math.abs(patchLum(dodged.x) - patchLum(noMask.x)) < 3,
+  `corner ${patchLum(noMask.x).toFixed(1)} → ${patchLum(dodged.x).toFixed(1)}`);
+
+// Erasing should reduce coverage again.
+const beforeErase = maskEngine.maskCoverage();
+maskEngine.paintDab({ x: 0.5, y: 0.5, radius: 0.3, strength: 1, erase: true });
+check('erase reduces coverage', maskEngine.maskCoverage() < beforeErase,
+  `${(beforeErase * 100).toFixed(2)}% → ${(maskEngine.maskCoverage() * 100).toFixed(2)}%`);
+
+// A fresh negative clears the mask.
+const fresh = new Darkroom();
+fresh.load(img, img.width, img.height);
+check('loading a new negative clears the mask', fresh.maskCoverage() === 0);
+
+// --- 8. ZIP writer ------------------------------------------------------
+console.log('\nbatch:');
+const enc = new TextEncoder();
+const zip = createZip([
+  { name: 'a.txt', data: enc.encode('hello noir') },
+  { name: 'b.txt', data: enc.encode('second entry') },
+]);
+const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+check('zip has a local header signature', dv.getUint32(0, true) === 0x04034b50,
+  `0x${dv.getUint32(0, true).toString(16)}`);
+check('zip has an end-of-central-directory', (() => {
+  for (let i = zip.length - 22; i >= 0; i--) {
+    if (new DataView(zip.buffer, zip.byteOffset + i, 4).getUint32(0, true) === 0x06054b50) return true;
+  }
+  return false;
+})());
+check('zip records both entries', (() => {
+  const eocd = zip.length - 22;
+  return new DataView(zip.buffer, zip.byteOffset + eocd, 22).getUint16(8, true) === 2;
+})());
+check('zip stores the payload bytes', Buffer.from(zip).includes(Buffer.from('hello noir')));
+
+// --- 9. Write visual proofs --------------------------------------------
 mkdirSync('tools/out', { recursive: true });
 const sheet = createCanvas(W * 3, H * 4);
 const sctx = sheet.getContext('2d');

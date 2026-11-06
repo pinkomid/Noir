@@ -6,10 +6,11 @@
  */
 
 import { Darkroom, SUPPORTS_FILTER } from './engine.js';
+import { BatchJob } from './batch.js';
 import { PRESETS, PRESET_BY_ID, paramsFor } from './presets.js';
-import { DEFAULTS as CONTROL_DEFAULTS } from './controls.js';
+import { DEFAULTS as CONTROL_DEFAULTS, CURVE_POINTS, ALL_CONTROLS } from './controls.js';
 import {
-  $, buildPresetRail, buildPanel, drawHistogram,
+  $, el, buildPresetRail, buildPanel, drawHistogram,
   initToasts, toast, initModals,
 } from './ui.js';
 
@@ -37,6 +38,8 @@ const state = {
   sampleIndex: -1,
   busy: false,
   drafting: false,
+  brush: false,
+  erase: false,
 };
 
 const history = { stack: [], index: -1 };
@@ -74,11 +77,16 @@ let panel = buildPanel(panelBody, {
   onChange: (id, value, { commit }) => {
     state.params[id] = value;
 
+    // Toggles and the curve commit on click, so they never need a draft.
+    const isDiscrete = id === 'curvePoints' || typeof value === 'boolean';
+
     // While a slider is being dragged, render a lighter copy so the
     // preview keeps up; the full-quality pass lands on release.
-    state.drafting = !commit;
+    state.drafting = !commit && !isDiscrete;
     clearTimeout(draftTimer);
-    if (!commit) draftTimer = setTimeout(() => { state.drafting = false; scheduleRender(); }, 220);
+    if (!commit && !isDiscrete) {
+      draftTimer = setTimeout(() => { state.drafting = false; scheduleRender(); }, 220);
+    }
 
     scheduleRender();
     panel.sync(state.params);
@@ -134,8 +142,11 @@ function applyPreset(id, commit = false) {
 
 function resetAll() {
   setPresetSilently(PRESETS[0].id);
-  state.params = { ...paramsFor(PRESETS[0].id) };
+  state.params = paramsFor(PRESETS[0].id);
+  engine.ensureMask();
+  state.brush = false;
   panel.sync(state.params);
+  updateBrushUi();
   scheduleRender({ histogram: true });
   pushHistory();
   toast('Adjustments reset');
@@ -145,8 +156,15 @@ function resetAll() {
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
+function cloneParams(params) {
+  return {
+    ...params,
+    curvePoints: params.curvePoints ? params.curvePoints.map((pt) => [pt[0], pt[1]]) : CURVE_POINTS.map((pt) => [...pt]),
+  };
+}
+
 function snapshot() {
-  return { presetId: state.presetId, params: { ...state.params } };
+  return { presetId: state.presetId, params: cloneParams(state.params) };
 }
 
 function pushHistory() {
@@ -163,7 +181,7 @@ function pushHistory() {
 
 function restoreSnap(snap) {
   state.presetId = snap.presetId;
-  state.params = { ...snap.params };
+  state.params = cloneParams(snap.params);
   rail.setActive(snap.presetId);
   panel.sync(state.params);
   updateReadout();
@@ -540,9 +558,148 @@ function zoomFit() {
   layoutView();
 }
 
+/* ------------------------------------------------------------------ */
+/* Brush (local dodge & burn)                                          */
+/* ------------------------------------------------------------------ */
+
+const brushBtn = $('#brushBtn');
+const eraseBtn = $('#eraseBtn');
+
+function updateBrushUi() {
+  brushBtn.classList.toggle('active', state.brush);
+  brushBtn.setAttribute('aria-pressed', String(state.brush));
+  eraseBtn.classList.toggle('active', state.brush && state.erase);
+  stageFrame.classList.toggle('brushing', state.brush);
+  stageFrame.classList.toggle('erasing', state.brush && state.erase);
+  view.style.cursor = state.brush ? 'none' : '';
+  if (state.brush) {
+    // Painting only makes sense with the mask panel's strength wired up.
+    panel.openGroup('local', true);
+  } else {
+    hideBrushCursor();
+    stageFrame.style.cursor = '';
+  }
+}
+
+function toggleBrush(force) {
+  if (!engine.loaded) {
+    toast('Open a photo first');
+    return;
+  }
+  state.brush = force === undefined ? !state.brush : !!force;
+  if (!state.brush) state.erase = false;
+  updateBrushUi();
+  if (state.brush) {
+    setStatus(state.erase ? 'Erase mode · paint to clear the mask' : 'Brush mode · paint to dodge or burn');
+  } else {
+    setStatus('Ready');
+    pushHistory();
+  }
+}
+
+function toggleErase() {
+  if (!state.brush) toggleBrush(true);
+  state.erase = !state.erase;
+  updateBrushUi();
+  setStatus(state.erase ? 'Erase mode · paint to clear the mask' : 'Brush mode · paint to dodge or burn');
+}
+
+/** Where is the pointer, in normalised negative coordinates? */
+function stagePoint(event) {
+  const rect = view.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
+  if (x < -0.02 || x > 1.02 || y < -0.02 || y > 1.02) return null;
+  return { x, y };
+}
+
+let brushCursor = null;
+let lastPointerEvent = null;
+
+function showBrushCursor(event) {
+  if (!brushCursor) {
+    brushCursor = el('div', { class: 'brush-cursor', 'aria-hidden': 'true' });
+    stageFrame.append(brushCursor);
+  }
+  const size = (state.params.maskSize / 100) * 2 * view.getBoundingClientRect().height;
+  brushCursor.style.width = `${size}px`;
+  brushCursor.style.height = `${size}px`;
+  brushCursor.style.transform = `translate(${event.clientX - stageFrame.getBoundingClientRect().left}px, ${
+    event.clientY - stageFrame.getBoundingClientRect().top
+  }px) translate(-50%, -50%)`;
+  brushCursor.classList.toggle('erasing', state.erase);
+  brushCursor.style.opacity = '1';
+}
+
+function hideBrushCursor() {
+  if (brushCursor) brushCursor.style.opacity = '0';
+}
+
+// Brush size follows maskSize (2 … 40 → 2% … 28% of the short edge).
+function brushRadius() {
+  return Math.max(0.012, (state.params.maskSize / 100) * 0.62);
+}
+
+let strokeStarted = false;
+let lastDab = null;
+
+function paintAt(event, strength) {
+  const point = stagePoint(event);
+  if (!point) return;
+
+  const radius = brushRadius();
+  const dab = {
+    x: point.x,
+    y: point.y,
+    radius,
+    strength,
+    erase: state.erase,
+  };
+
+  engine.paintDab(dab);
+
+  // Interpolate between dabs so a fast stroke stays continuous.
+  if (lastDab) {
+    const dx = dab.x - lastDab.x;
+    const dy = dab.y - lastDab.y;
+    const dist = Math.hypot(dx, dy);
+    const step = radius * 0.35;
+    const steps = Math.min(40, Math.floor(dist / Math.max(0.001, step)));
+    for (let i = 1; i <= steps; i++) {
+      engine.paintDab({
+        x: lastDab.x + (dx * i) / (steps + 1),
+        y: lastDab.y + (dy * i) / (steps + 1),
+        radius,
+        strength,
+        erase: state.erase,
+      });
+    }
+  }
+
+  lastDab = dab;
+  state.drafting = true;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => { state.drafting = false; scheduleRender(); }, 200);
+  scheduleRender({ histogram: true });
+}
+
 /* Pan the zoomed view */
 let panStart = null;
 stageFrame.addEventListener('pointerdown', (event) => {
+  if (state.brush && engine.loaded) {
+    if (event.button !== 0 && event.button !== 2) return;
+    if (event.button === 2) state.erase = true;
+
+    event.preventDefault();
+    strokeStarted = true;
+    lastDab = null;
+    stageFrame.setPointerCapture(event.pointerId);
+    // A single tap should register even without movement.
+    paintAt(event, 1);
+    return;
+  }
+
   if (!engine.loaded || state.view.zoom === 'fit') return;
   if (event.button !== 0) return;
   panStart = { x: event.clientX, y: event.clientY, px: state.view.panX, py: state.view.panY };
@@ -551,6 +708,18 @@ stageFrame.addEventListener('pointerdown', (event) => {
 });
 
 stageFrame.addEventListener('pointermove', (event) => {
+  lastPointerEvent = event;
+  if (state.brush && engine.loaded) {
+    // Holding Alt flips to erase without leaving the stroke.
+    if (event.altKey !== state.erase && !eraseBtn.dataset.locked) {
+      state.erase = event.altKey;
+      updateBrushUi();
+    }
+    showBrushCursor(event);
+    if (strokeStarted) paintAt(event, 0.55);
+    return;
+  }
+
   if (!panStart) return;
   state.view.panX = panStart.px + (event.clientX - panStart.x);
   state.view.panY = panStart.py + (event.clientY - panStart.y);
@@ -558,12 +727,26 @@ stageFrame.addEventListener('pointermove', (event) => {
 });
 
 function endPan() {
+  if (strokeStarted) {
+    strokeStarted = false;
+    lastDab = null;
+    state.drafting = false;
+    scheduleRender({ histogram: true });
+    pushHistory();
+    return;
+  }
   if (!panStart) return;
   panStart = null;
   stageFrame.style.cursor = '';
 }
 stageFrame.addEventListener('pointerup', endPan);
 stageFrame.addEventListener('pointercancel', endPan);
+stageFrame.addEventListener('pointerleave', () => {
+  if (state.brush) hideBrushCursor();
+});
+stageFrame.addEventListener('contextmenu', (event) => {
+  if (state.brush) event.preventDefault();
+});
 
 stageFrame.addEventListener(
   'wheel',
@@ -672,6 +855,8 @@ $('#zoomOut').addEventListener('click', () => zoomBy(-1));
 $('#undoBtn').addEventListener('click', undo);
 $('#redoBtn').addEventListener('click', redo);
 $('#shortcutsBtn').addEventListener('click', () => modals.openModal($('#shortcutsModal')));
+brushBtn.addEventListener('click', () => toggleBrush());
+eraseBtn.addEventListener('click', () => toggleErase());
 
 exportFormat.addEventListener('change', updateExportPreview);
 exportSize.addEventListener('change', updateExportPreview);
@@ -681,6 +866,231 @@ exportQuality.addEventListener('input', () => {
 $('#doExportBtn').addEventListener('click', doExport);
 
 /* ------------------------------------------------------------------ */
+/* Batch develop                                                       */
+/* ------------------------------------------------------------------ */
+
+const batch = new BatchJob();
+const batchModal = $('#batchModal');
+const batchList = $('#batchList');
+const batchInput = $('#batchInput');
+const batchRunBtn = $('#batchRunBtn');
+const batchZipBtn = $('#batchZipBtn');
+const batchCancelBtn = $('#batchCancelBtn');
+const batchProgress = $('#batchProgress');
+const batchBarFill = $('#batchBarFill');
+const batchStatusText = $('#batchStatus');
+const batchFormat = $('#batchFormat');
+const batchSize = $('#batchSize');
+const batchQuality = $('#batchQuality');
+const batchQualityField = $('#batchQualityField');
+const batchDrop = $('#batchDrop');
+
+const STATUS_LABEL = {
+  queued: 'queued',
+  working: 'developing…',
+  done: 'done',
+  error: 'failed',
+};
+
+function openBatch() {
+  renderBatchList();
+  modals.openModal(batchModal);
+}
+
+function addToBatch(files) {
+  let added = 0;
+  for (const file of files) {
+    if (batch.add(file)) added++;
+  }
+  if (added) {
+    renderBatchList();
+    toast(added === 1 ? '1 photo queued' : `${added} photos queued`, { timeout: 1500 });
+  } else {
+    toast('No images in that selection');
+  }
+}
+
+function renderBatchList() {
+  batchList.innerHTML = '';
+
+  for (const item of batch.items) {
+    const thumb = el('img', { class: 'batch-item-thumb', alt: '', loading: 'lazy' });
+    thumb.src = item.thumb || URL.createObjectURL(item.file);
+    if (!item.thumb) item.thumb = thumb.src;
+
+    const row = el('li', { class: 'batch-item', dataset: { status: item.status } }, [
+      thumb,
+      el('span', { class: 'batch-item-name', text: item.name, title: item.name }),
+      el('span', { class: 'batch-item-status', text: STATUS_LABEL[item.status] || item.status }),
+      el('button', {
+        class: 'batch-item-remove',
+        type: 'button',
+        text: '✕',
+        'aria-label': `Remove ${item.name}`,
+        onclick: () => {
+          batch.remove(item.id);
+          renderBatchList();
+        },
+      }),
+    ]);
+    batchList.append(row);
+  }
+
+  const preset = PRESET_BY_ID[state.presetId];
+  const recipe = $('#batchRecipe');
+  recipe.innerHTML = '';
+  recipe.append(document.createTextNode('Recipe: '));
+  recipe.append(el('strong', { text: preset.name + (isModified() ? ' *' : '') }));
+
+  const pending = batch.pending;
+  batchRunBtn.disabled = pending === 0 || batch.running;
+  batchRunBtn.textContent = batch.running ? 'Developing…' : pending ? `Develop ${pending}` : 'Develop all';
+  batchZipBtn.disabled = batch.done === 0 || batch.running;
+  batchZipBtn.textContent = batch.done ? `Download ZIP (${batch.done})` : 'Download ZIP';
+  updateBatchQualityField();
+}
+
+function updateBatchQualityField() {
+  batchQualityField.style.display = batchFormat.value === 'image/png' ? 'none' : '';
+}
+
+async function runBatch() {
+  if (batch.running || batch.pending === 0) return;
+
+  batchRunBtn.disabled = true;
+  batchCancelBtn.hidden = false;
+  batchProgress.hidden = false;
+  batchBarFill.style.width = '0%';
+
+  const params = cloneParams(state.params);
+
+  const results = await batch.run(params, {
+    format: batchFormat.value,
+    quality: Number(batchQuality.value) / 100,
+    longEdge: Number(batchSize.value),
+    onProgress: ({ index, total }) => {
+      const pct = total ? (index / total) * 100 : 0;
+      batchBarFill.style.width = `${pct.toFixed(1)}%`;
+      batchStatusText.textContent = `${index} / ${total}`;
+      renderBatchList();
+    },
+  });
+
+  batchCancelBtn.hidden = true;
+  batchProgress.hidden = false;
+  batchBarFill.style.width = '100%';
+  batchStatusText.textContent = batch.cancelled ? 'stopped' : `${results.length} developed`;
+  renderBatchList();
+
+  const failed = batch.items.filter((i) => i.status === 'error').length;
+  if (results.length) {
+    toast(
+      failed ? `${results.length} developed · ${failed} failed` : `${results.length} photos developed`,
+      { accent: true, timeout: 2600 }
+    );
+  }
+}
+
+async function downloadBatchZip() {
+  if (batch.done === 0) return;
+  batchZipBtn.disabled = true;
+  const label = batchZipBtn.textContent;
+  batchZipBtn.textContent = 'Packing…';
+
+  try {
+    const bytes = await batch.archive('noir-batch', batchFormat.value);
+    const stem = PRESET_BY_ID[state.presetId].name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const name = `noir-batch-${stem}-${new Date().toISOString().slice(0, 10)}.zip`;
+    downloadBlob(new Blob([bytes], { type: 'application/zip' }), name);
+    toast(`Packaged ${batch.done} files · ${formatBytes(bytes.length)}`, { accent: true, timeout: 3000 });
+  } catch (error) {
+    console.error(error);
+    toast('Could not build the archive');
+  } finally {
+    batchZipBtn.textContent = label;
+    renderBatchList();
+  }
+}
+
+$('#batchBtn').addEventListener('click', openBatch);
+$('#batchAddBtn').addEventListener('click', () => batchInput.click());
+$('#batchSampleBtn').addEventListener('click', async () => {
+  batchSampleBtnBusy(true);
+  try {
+    for (const sample of SAMPLES) {
+      const img = await decodeImage(sample.src);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+      if (!blob) throw new Error('could not encode the sample');
+      const name = sample.src.split('/').pop();
+      // File is nicer, but Blob keeps this working where File is unavailable.
+      const entry = typeof File === 'function'
+        ? new File([blob], name, { type: 'image/jpeg' })
+        : Object.assign(blob, { name });
+      addToBatch([entry]);
+    }
+  } catch (error) {
+    console.error(error);
+    toast('Could not load the samples');
+  } finally {
+    batchSampleBtnBusy(false);
+  }
+});
+
+function batchSampleBtnBusy(busy) {
+  const btn = $('#batchSampleBtn');
+  btn.disabled = busy;
+  btn.textContent = busy ? 'Loading…' : 'Add samples';
+}
+
+$('#batchClearBtn').addEventListener('click', () => {
+  batch.clear();
+  batchProgress.hidden = true;
+  renderBatchList();
+});
+
+batchInput.addEventListener('change', () => {
+  addToBatch(Array.from(batchInput.files || []));
+  batchInput.value = '';
+});
+
+batchRunBtn.addEventListener('click', runBatch);
+batchZipBtn.addEventListener('click', downloadBatchZip);
+batchCancelBtn.addEventListener('click', () => batch.cancel());
+batchFormat.addEventListener('change', renderBatchList);
+batchSize.addEventListener('change', renderBatchList);
+batchQuality.addEventListener('input', () => {
+  $('#batchQualityValue').textContent = batchQuality.value;
+});
+
+// Drag & drop straight onto the dialog.
+let batchDrag = 0;
+batchDrop.addEventListener('dragenter', (event) => {
+  event.preventDefault();
+  batchDrag++;
+  batchDrop.classList.add('active');
+});
+batchDrop.addEventListener('dragover', (event) => event.preventDefault());
+batchDrop.addEventListener('dragleave', () => {
+  batchDrag = Math.max(0, batchDrag - 1);
+  if (!batchDrag) batchDrop.classList.remove('active');
+});
+batchDrop.addEventListener('drop', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  batchDrag = 0;
+  batchDrop.classList.remove('active');
+  addToBatch(Array.from(event.dataTransfer?.files || []));
+});
+
+// While the batch dialog is open, drops belong to it, not the editor.
+batchModal.addEventListener('dragover', (event) => event.preventDefault());
+batchModal.addEventListener('drop', (event) => event.stopPropagation());
+
+/* ------------------------------------------------------------------ */
 /* Keyboard                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -688,7 +1098,8 @@ const TYPING = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
 
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    modals.closeTop();
+    if (modals.closeTop()) return;
+    if (state.brush) { toggleBrush(false); return; }
     stopCompare();
     return;
   }
@@ -707,6 +1118,18 @@ window.addEventListener('keydown', (event) => {
   if (mod || event.altKey) return;
 
   switch (event.key) {
+    case 'b': case 'B':
+      event.preventDefault();
+      if (event.shiftKey) openBatch();
+      else toggleBrush();
+      break;
+    case '[':
+      setParam('maskSize', Math.max(2, state.params.maskSize - 2));
+      if (state.brush) showBrushCursor(lastPointerEvent || { clientX: 0, clientY: 0 });
+      break;
+    case ']':
+      setParam('maskSize', Math.min(40, state.params.maskSize + 2));
+      break;
     case 'o': case 'O':
       event.preventDefault();
       fileInput.click();

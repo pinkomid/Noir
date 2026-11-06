@@ -50,11 +50,26 @@ Pick one and keep adjusting — nothing is baked in.
 ### Adjustments
 
 - **Tone** — exposure (EV), contrast, highlights, shadows, whites, blacks
+- **Manual curve** — drag control points to reshape the print; click to add a
+  point, alt-click to remove one. Interpolated with a monotone cubic spline, so
+  dragging a handle can never overshoot into a tonal inversion.
 - **Density & structure** — clarity (local contrast), halation (bloom), matte fade
 - **Grain** — amount and size, weighted toward the mid tones like real silver
 - **Toning** — seven chemistries with independent strength
 - **Channel mix** — red/green/blue weights for the panchromatic response
+- **Local dodge & burn** — paint a mask with the brush, then pull *Strength*
+  positive to dodge or negative to burn. Alt-drag erases. Strokes are stored
+  as an 8-bit coverage map and applied per pixel, so the edit is genuinely
+  local rather than a global gradient.
 - **Frame & finish** — vignette (positive values brighten the corners)
+
+### Batch develop
+
+Press **Shift + B** (or hit **Batch** in the toolbar) to queue a whole shoot.
+Add files by picking them or dropping them on the dialog, choose format, size
+and quality once, then develop them all through the current recipe. Export
+either as individual downloads or as a single ZIP — written by hand in
+`js/batch.js`, since the app ships no dependencies.
 
 ### Workflow
 
@@ -63,6 +78,8 @@ Pick one and keep adjusting — nothing is baked in.
 - <kbd>⌘/Ctrl</kbd> + scroll or <kbd>+</kbd> / <kbd>−</kbd> to zoom; drag to pan
 - <kbd>⌘/Ctrl Z</kbd> / <kbd>⇧⌘Z</kbd> for undo and redo
 - <kbd>1</kbd>–<kbd>9</kbd> jump between stocks, <kbd>←</kbd> <kbd>→</kbd> step through all twelve
+- <kbd>B</kbd> toggles the brush, <kbd>[</kbd> / <kbd>]</kbd> change its size, <kbd>Alt</kbd> erases
+- <kbd>Shift B</kbd> opens batch develop
 - <kbd>?</kbd> shows the full shortcut sheet
 
 Choose **Export** to bake the look into a JPEG, PNG or WebP at up to full
@@ -78,9 +95,11 @@ The pipeline mirrors a real darkroom's order of operations:
 negative ──► clarity (unsharp) ──► halation (bloom) ──► single tonal pass ──► print
                                                          ├ channel mix
                                                          ├ exposure
-                                                         ├ tone curve (256-entry LUT)
+                                                         ├ tone curve (256-entry LUT,
+                                                         │    including the manual curve)
                                                          ├ film grain
                                                          ├ vignette
+                                                         ├ local mask (dodge/burn)
                                                          └ toning
 ```
 
@@ -110,10 +129,12 @@ styles/main.css       the entire design system
 js/engine.js          canvas pipeline: LUT, grain field, toning, histogram
 js/presets.js         the twelve film stocks
 js/controls.js        adjustment panel schema (single source of truth for ranges)
-js/ui.js              DOM builders: rail, panel, histogram, modals, toasts
-js/app.js             state, history, view, export, keyboard
-tools/test-engine.mjs headless checks for the development pipeline
+js/ui.js              DOM builders: rail, panel, curve editor, histogram, modals
+js/batch.js           batch runner and a dependency-free ZIP writer
+js/app.js             state, history, view, brush, export, keyboard
+tools/test-engine.mjs headless checks: pipeline, curve, mask, ZIP
 tools/test-ui.mjs     boots the real UI in jsdom and drives the user journeys
+tools/test-deploy.mjs verifies the Pages build is self-contained
 ```
 
 ---
@@ -123,15 +144,38 @@ tools/test-ui.mjs     boots the real UI in jsdom and drives the user journeys
 The engine is verified against real pixels, including a rendered proof sheet.
 
 ```bash
-npm i -D @napi-rs/canvas jsdom acorn
-node tools/test-engine.mjs      # 30 checks: tonal math, grain, toning, export
-node tools/test-ui.mjs          # 36 checks: boot, loading, sliders, undo, export, keys
+npm i -D @napi-rs/canvas jsdom
+npm test                        # engine + UI suites
+npm run build && node tools/test-deploy.mjs
 ```
+
+- `test-engine.mjs` — 45 checks: tonal math, grain, toning, export, the monotone
+  curve (including a monotonicity sweep), the dodge/burn mask, and the ZIP writer
+- `test-ui.mjs` — 36 checks: boot, loading, sliders, undo/redo, compare, zoom,
+  export download, reset, keyboard
+- `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
+  contains no root-absolute paths, and publishes no test tooling
 
 `test-engine.mjs` also writes `tools/out/preset-sheet.png` and a full-resolution
 export, so visual regressions are easy to spot.
 
 ---
+
+## Deploying to GitHub Pages
+
+The live site is **https://pinkomid.github.io/Noir-Photo-Studio/**.
+
+`.github/workflows/deploy-pages.yml` assembles a minimal `_site` (app files only —
+no tests, no tooling), fails the build if any root-absolute path slips in, and
+publishes on every push to `main`.
+
+**One-time setup:** in the repository, go to **Settings → Pages → Build and
+deployment → Source** and choose **GitHub Actions**. After that the workflow
+deploys automatically on each merge to `main`.
+
+`npm run build` produces the same `_site` locally, and `node tools/test-deploy.mjs`
+checks it — including that the app still works when served from the
+`/Noir-Photo-Studio/` subpath a project page uses.
 
 ## Browser support
 

@@ -140,7 +140,98 @@ function sampleGrain(field, x, y) {
 export function lutKey(p) {
   return [
     p.contrast, p.highlights, p.shadows, p.whites, p.blacks, p.fade,
+    p.curveOn ? curveKey(p.curvePoints) : 'off',
   ].join(':');
+}
+
+/** Stable signature for a point list, used for LUT cache lookups. */
+function curveKey(points) {
+  if (!points || !points.length) return 'id';
+  return points.map(([x, y]) => `${Math.round(x * 1000)},${Math.round(y * 1000)}`).join(';');
+}
+
+/** Is this curve an exact identity (or effectively absent)? */
+export function isIdentityCurve(points) {
+  if (!points || points.length < 2) return true;
+  for (const [x, y] of points) {
+    if (Math.abs(x - y) > 0.002) return false;
+  }
+  return true;
+}
+
+/**
+ * Monotone cubic (Fritsch–Carlson) interpolation through the control points.
+ * This is the standard choice for tone curves: unlike a natural cubic
+ * spline it cannot overshoot between points, so dragging a handle never
+ * introduces a ring or a tonal inversion next to it.
+ *
+ * @returns {(x: number) => number} evaluator over 0…1
+ */
+export function curveInterpolator(points) {
+  const pts = (points || []).slice().sort((a, b) => a[0] - b[0]);
+  if (pts.length < 2) return (x) => x;
+
+  const n = pts.length;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+
+  // Secant slopes between neighbouring points.
+  const dx = new Array(n - 1);
+  const dy = new Array(n - 1);
+  const slope = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = xs[i + 1] - xs[i] || 1e-6;
+    dy[i] = ys[i + 1] - ys[i];
+    slope[i] = dy[i] / dx[i];
+  }
+
+  // Tangents, then the Fritsch–Carlson monotonicity clamp.
+  const m = new Array(n);
+  m[0] = slope[0];
+  m[n - 1] = slope[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    m[i] = slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / slope[i];
+    const b = m[i + 1] / slope[i];
+    const h = a * a + b * b;
+    if (h > 9) {
+      const t = 3 / Math.sqrt(h);
+      m[i] = t * a * slope[i];
+      m[i + 1] = t * b * slope[i];
+    }
+  }
+
+  return (x) => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+
+    // Binary search for the segment.
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid] <= x) lo = mid;
+      else hi = mid;
+    }
+
+    const h = dx[lo];
+    const t = (x - xs[lo]) / h;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    // Hermite basis
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+    return h00 * ys[lo] + h10 * h * m[lo] + h01 * ys[lo + 1] + h11 * h * m[lo + 1];
+  };
 }
 
 function smoothstep(edge0, edge1, x) {
@@ -163,6 +254,11 @@ export function buildLUT(p) {
   const bl = (p.blacks / 100) * 0.14;
   const fade = Math.max(0, p.fade) / 100;
 
+  // The manual curve runs after the tonal zones, before the matte lift:
+  // it is the last word on the shape of the print.
+  const useCurve = !!p.curveOn && p.curvePoints && !isIdentityCurve(p.curvePoints);
+  const curve = useCurve ? curveInterpolator(p.curvePoints) : null;
+
   for (let i = 0; i < 256; i++) {
     let x = i / 255;
 
@@ -182,6 +278,10 @@ export function buildLUT(p) {
     const wBl = smoothstep(0.38, 0.0, x) * ((1 - x) * (1 - x));
 
     x += hi * wHi + sh * wSh + wh * wWh + bl * wBl;
+
+    if (curve) {
+      x = curve(Math.min(1, Math.max(0, x)));
+    }
 
     // Matte / fade: lift the blacks and pull the whites back toward paper.
     if (fade > 0) {
@@ -219,6 +319,11 @@ export class Darkroom {
     this.surfaceW = 0;
     this.surfaceH = 0;
 
+    // Local-adjustment mask: an 8-bit coverage map the size of the preview
+    // surface. One overlay (dodge/burn) is stored as a single channel.
+    this.mask = null;
+    this.maskCtx = null;
+
     this.scratch = document.createElement('canvas');   // blur target
     this.scratchCtx = this.scratch.getContext('2d', { willReadFrequently: true });
     this.histCanvas = document.createElement('canvas');
@@ -252,7 +357,91 @@ export class Darkroom {
     sctx.clearRect(0, 0, this.surfaceW, this.surfaceH);
     sctx.drawImage(source, 0, 0, this.surfaceW, this.surfaceH);
 
+    this.ensureMask();
     return { width, height };
+  }
+
+  /** Create (or clear) the local-adjustment mask. */
+  ensureMask(clear = true) {
+    if (!this.mask) {
+      this.mask = document.createElement('canvas');
+      this.maskCtx = this.mask.getContext('2d', { willReadFrequently: true });
+    }
+    if (this.mask.width !== this.surfaceW || this.mask.height !== this.surfaceH) {
+      this.mask.width = this.surfaceW;
+      this.mask.height = this.surfaceH;
+      clear = true;
+    }
+    if (clear) {
+      this.maskCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.maskCtx.globalCompositeOperation = 'source-over';
+      this.maskCtx.fillStyle = '#000';
+      this.maskCtx.fillRect(0, 0, this.surfaceW, this.surfaceH);
+    }
+    return this.mask;
+  }
+
+  /**
+   * Paint one dab of the mask. Coordinates are normalised (0…1) so the
+   * same stroke lands in the same place at any zoom level.
+   * @param {{x:number,y:number,radius:number,strength:number,erase?:boolean}} dab
+   */
+  paintDab({ x, y, radius, strength = 1, erase = false }) {
+    const ctx = this.maskCtx;
+    if (!ctx) return null;
+
+    const w = this.mask.width;
+    const h = this.mask.height;
+    const cx = x * w;
+    const cy = y * h;
+    const r = Math.max(0.5, radius * Math.min(w, h));
+
+    ctx.globalCompositeOperation = erase ? 'source-over' : 'lighter';
+
+    if (erase) {
+      // Painterly erase: knock coverage back down with a soft dab.
+      ctx.globalCompositeOperation = 'source-over';
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grad.addColorStop(0, `rgba(0,0,0,${Math.min(1, strength)})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+    } else {
+      // Additive, so overlapping dabs build coverage toward full white.
+      const a = Math.min(1, strength * 0.42);
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grad.addColorStop(0, `rgba(255,255,255,${a})`);
+      grad.addColorStop(0.62, `rgba(255,255,255,${a * 0.55})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+    }
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    return true;
+  }
+
+  /** How much of the frame has been painted, 0…1 (drives the "modified" dot). */
+  maskCoverage() {
+    if (!this.maskCtx) return 0;
+    const { width: w, height: h } = this.mask;
+    const step = 4;
+    let data;
+    try {
+      data = this.maskCtx.getImageData(0, 0, w, h).data;
+    } catch {
+      return 0;
+    }
+    let hit = 0;
+    let total = 0;
+    for (let y = 0; y < h; y += step) {
+      for (let x = 0; x < w; x += step) {
+        const i = (y * w + x) * 4;
+        if (data[i] > 24) hit++;
+        total++;
+      }
+    }
+    return total ? hit / total : 0;
   }
 
   /** Does the negative carry transparency? (drives the checkerboard) */
@@ -345,7 +534,40 @@ export class Darkroom {
     sctx.filter = 'none';
   }
 
-  /** One pixel pass: mix → exposure → curve → grain → vignette → tone. */
+  /**
+   * Read the mask into a Float32Array of coverage (0…1) at `w`×`h`.
+   * Returns null when there is nothing to apply.
+   */
+  _readMask(w, h) {
+    if (!this.maskCtx || !this.mask) return null;
+    let data;
+    try {
+      data = this.maskCtx.getImageData(0, 0, this.mask.width, this.mask.height).data;
+    } catch {
+      return null;
+    }
+
+    const mw = this.mask.width;
+    const mh = this.mask.height;
+    const out = new Float32Array(w * h);
+    let any = false;
+
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(mh - 1, (y * mh / h) | 0);
+      const row = sy * mw;
+      const drow = y * w;
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(mw - 1, (x * mw / w) | 0);
+        const v = data[(row + sx) * 4] / 255;
+        if (v > 0.002) any = true;
+        out[drow + x] = v;
+      }
+    }
+
+    return any ? out : null;
+  }
+
+  /** One pixel pass: mix → exposure → curve → grain → vignette → mask → tone. */
   _tonalPass(dctx, w, h, p, opts) {
     const lut = cachedLUT(p);
 
@@ -396,6 +618,11 @@ export class Darkroom {
     const invRX = rx > 0 ? 1 / rx : 0;
     const invRY = ry > 0 ? 1 / ry : 0;
 
+    // Local adjustment through the mask. Amount of 0 disables the pass
+    // entirely so an unpainted frame costs nothing.
+    const maskAmt = Math.max(-100, Math.min(100, p.maskAmount || 0)) / 100;
+    const mask = Math.abs(maskAmt) > 0.004 ? this._readMask(w, h) : null;
+
     const doVig = Math.abs(vig) > 0.001;
     const doTone = ts > 0.001;
     const doMix = Math.abs(wr - 1) > 0.002 || Math.abs(wg - 1) > 0.002 || Math.abs(wb - 1) > 0.002;
@@ -445,7 +672,17 @@ export class Darkroom {
           }
         }
 
-        // 6 — clamp and tone
+        // 6 — local dodge / burn through the painted mask
+        if (mask !== null) {
+          const cover = mask[idx >> 2];
+          if (cover > 0) {
+            const k = cover * maskAmt;
+            if (k > 0) out += (255 - out) * k * 0.92;   // dodge: lift
+            else out *= 1 + k * 0.92;                    // burn: deepen
+          }
+        }
+
+        // 7 — clamp and tone
         if (out < 0) out = 0;
         else if (out > 255) out = 255;
 
