@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>NOIR Photo Studio — Browser Darkroom</title>
+<meta name="description" content="NOIR Photo Studio — a private, in-browser black & white darkroom. Film emulations, grain, toning and full-resolution export. Your photos never leave your device." />
+<meta name="theme-color" content="#0a0a0b" />
+<link rel="preload" as="image" href="assets/sample-portrait.jpg" />
+<link rel="stylesheet" href="styles/main.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0a0b'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='19' fill='%23e9e4da' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+
+<a class="skip-link" href="#stage">Skip to canvas</a>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.2">
+        <circle cx="16" cy="16" r="13.2" stroke-opacity=".55"/>
+        <circle cx="16" cy="16" r="7.4"/>
+        <path d="M16 2.8v6M16 23.2v6M2.8 16h6M23.2 16h6" stroke-opacity=".5"/>
+        <circle cx="16" cy="16" r="1.7" fill="currentColor" stroke="none"/>
+      </svg>
+    </span>
+    <div class="brand-text">
+      <h1>NOIR</h1>
+      <p>Photo Studio · Darkroom</p>
+    </div>
+  </div>
+
+  <div class="film-readout" id="filmReadout" aria-live="polite">
+    <span class="film-name">No negative loaded</span>
+    <span class="film-detail">Open a photo to begin</span>
+  </div>
+
+  <nav class="topbar-actions" aria-label="File actions">
+    <button class="btn" id="openBtn" type="button" title="Open a photo (O)">
+      <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3m0 0L6.4 6.6M10 3l3.6 3.6M3.4 12.4v3.2a1.4 1.4 0 0 0 1.4 1.4h10.4a1.4 1.4 0 0 0 1.4-1.4v-3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Open</span>
+    </button>
+    <button class="btn" id="sampleBtn" type="button" title="Load the sample negative">Sample</button>
+    <button class="btn" id="batchBtn" type="button" title="Batch develop many photos (Shift+B)">
+      <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.6" y="5.4" width="9.2" height="9.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 3.6h9.6a1.4 1.4 0 0 1 1.4 1.4V15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <span>Batch</span>
+    </button>
+    <button class="btn" id="resetBtn" type="button" title="Reset all adjustments (R)">Reset</button>
+    <button class="btn btn-primary" id="exportBtn" type="button" title="Export (E)">
+      <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10m0 0l-3.6-3.6M10 13l3.6-3.6M3.4 14.6v1.6a1.4 1.4 0 0 0 1.4 1.4h10.4a1.4 1.4 0 0 0 1.4-1.4v-1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Export</span>
+    </button>
+  </nav>
+</header>
+
+<main class="workspace">
+
+  <aside class="rail" id="rail" aria-label="Film stock presets">
+    <div class="rail-head">
+      <h2>Film stock</h2>
+      <span class="rail-hint">1–9</span>
+    </div>
+    <div class="preset-list" id="presetList" role="listbox" aria-label="Presets"></div>
+    <div class="rail-foot">
+      <div class="rail-note">
+        <strong>Private by design.</strong>
+        Every pixel is processed locally in your browser. Nothing is uploaded.
+      </div>
+      <button class="link-btn" id="shortcutsBtn" type="button">Keyboard shortcuts</button>
+    </div>
+  </aside>
+
+  <section class="stage" id="stage" tabindex="-1" aria-label="Preview">
+    <div class="stage-frame" id="stageFrame">
+      <canvas id="view" width="10" height="10" hidden></canvas>
+
+      <div class="empty" id="emptyState">
+        <div class="empty-inner">
+          <svg viewBox="0 0 64 48" width="84" height="63" aria-hidden="true" fill="none" stroke="currentColor">
+            <rect x="1.2" y="1.2" width="61.6" height="45.6" rx="3" stroke-opacity=".35"/>
+            <path d="M15 14h34v20H15z" stroke-opacity=".22"/>
+            <circle cx="24" cy="21" r="3.2" stroke-opacity=".45"/>
+            <path d="M15 34l9-9 7 7 6-5 12 12" stroke-opacity=".45" stroke-linejoin="round"/>
+            <path d="M18 38v8l8-4-8-4Z" fill="currentColor" fill-opacity=".5" stroke="none"/>
+          </svg>
+          <h2>Drop a photograph</h2>
+          <p>JPEG, PNG, WebP or HEIC-free originals. Drag a file here, paste from clipboard, or</p>
+          <div class="empty-actions">
+            <button class="btn btn-primary" id="emptyOpen" type="button">Choose a photo</button>
+            <button class="btn" id="emptySample" type="button">Try a sample negative</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+        <span>Release to develop</span>
+      </div>
+
+      <div class="brush-cursor" id="brushCursor" aria-hidden="true" hidden></div>
+      <div class="stage-badge" id="stageBadge" hidden></div>
+    </div>
+
+    <div class="stage-bar">
+      <div class="stage-bar-left">
+        <button class="tool" id="compareBtn" type="button" title="Hold to compare with original (\)">
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.6" y="3.6" width="14.8" height="12.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 3.6v12.8" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/></svg>
+          <span>Compare</span>
+        </button>
+        <button class="tool" id="brushBtn" type="button" aria-pressed="false" title="Brush — local dodge &amp; burn (B)">
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M13.4 3.6a2 2 0 0 1 2.8 2.8l-7 7-3.6.8.8-3.6 7-7Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          <span>Brush</span>
+        </button>
+        <button class="tool icon-only" id="eraseBtn" type="button" aria-pressed="false" aria-label="Erase mask" title="Erase mask (hold Alt)">
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M8.2 16.4H4.6a1 1 0 0 1-.7-.3l-1.2-1.2a1 1 0 0 1 0-1.4l7.6-7.6a1 1 0 0 1 1.4 0l3.4 3.4a1 1 0 0 1 0 1.4l-6.9 6.9M7 9.6l4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="stage-sep" aria-hidden="true"></span>
+        <div class="histogram-wrap">
+          <canvas id="histogram" width="220" height="52" aria-label="Histogram"></canvas>
+          <span class="hist-label">Histogram</span>
+        </div>
+      </div>
+      <div class="stage-bar-right">
+        <div class="zoom-control" role="group" aria-label="Zoom">
+          <button class="tool icon-only" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+          <output id="zoomValue">Fit</output>
+          <button class="tool icon-only" id="zoomIn" type="button" aria-label="Zoom in">+</button>
+        </div>
+        <span class="stage-sep" aria-hidden="true"></span>
+        <span class="dims" id="dims">—</span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel" aria-label="Adjustments">
+    <div class="panel-head">
+      <h2>Adjustments</h2>
+      <div class="panel-head-actions">
+        <button class="icon-btn" id="undoBtn" type="button" aria-label="Undo" title="Undo (⌘Z)">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M7.4 5.4L3.8 9l3.6 3.6M3.8 9h7.4a4.4 4.4 0 0 1 0 8.8H8.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon-btn" id="redoBtn" type="button" aria-label="Redo" title="Redo (⇧⌘Z)">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M12.6 5.4L16.2 9l-3.6 3.6M16.2 9H8.8a4.4 4.4 0 0 0 0 8.8h2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="link-btn" id="panelResetBtn" type="button">Reset all</button>
+      </div>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+    <div class="panel-foot">
+      <button class="btn btn-primary btn-block" id="exportBtn2" type="button">Export photograph</button>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span id="statusText">Ready</span>
+  <span class="statusbar-right">
+    <span class="dot" aria-hidden="true"></span>
+    <span>Local processing · no upload</span>
+  </span>
+</footer>
+
+<input type="file" id="fileInput" accept="image/*" hidden />
+
+<!-- Export dialog -->
+<div class="modal" id="exportModal" hidden>
+  <div class="modal-scrim" data-close-modal></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <header class="modal-head">
+      <h2 id="exportTitle">Export photograph</h2>
+      <button class="icon-btn" data-close-modal type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="modal-body">
+      <div class="export-grid">
+        <label class="field">
+          <span class="field-label">Format</span>
+          <select id="exportFormat">
+            <option value="image/jpeg" selected>JPEG</option>
+            <option value="image/png">PNG</option>
+            <option value="image/webp">WebP</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Long edge (px)</span>
+          <select id="exportSize">
+            <option value="0">Full resolution</option>
+            <option value="4096">4096</option>
+            <option value="2560">2560</option>
+            <option value="1920" selected>1920</option>
+            <option value="1280">1280</option>
+            <option value="1080">1080</option>
+          </select>
+        </label>
+        <label class="field" id="qualityField">
+          <span class="field-label">Quality <output id="qualityValue">92</output></span>
+          <input type="range" id="exportQuality" min="60" max="100" step="1" value="92" />
+        </label>
+        <label class="field">
+          <span class="field-label">File name</span>
+          <input type="text" id="exportName" spellcheck="false" />
+        </label>
+      </div>
+      <div class="export-preview">
+        <canvas id="exportPreview" width="10" height="10"></canvas>
+        <div class="export-meta" id="exportMeta">—</div>
+      </div>
+      <p class="export-note">Toning and grain are baked into the file. Metadata is stripped — the negative stays private.</p>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn" data-close-modal type="button">Cancel</button>
+      <button class="btn btn-primary" id="doExportBtn" type="button">Download</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Batch dialog -->
+<div class="modal" id="batchModal" hidden>
+  <div class="modal-scrim" data-close-modal></div>
+  <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="batchTitle">
+    <header class="modal-head">
+      <h2 id="batchTitle">Batch develop</h2>
+      <button class="icon-btn" data-close-modal type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="modal-body">
+      <div class="batch-top">
+        <button class="btn" id="batchAddBtn" type="button">Add photos…</button>
+        <button class="btn" id="batchSampleBtn" type="button">Add samples</button>
+        <button class="link-btn" id="batchClearBtn" type="button">Clear list</button>
+        <span class="batch-recipe" id="batchRecipe">Recipe: —</span>
+      </div>
+
+      <div class="batch-drop" id="batchDrop">
+        <span>Drop photos here to add them to the queue</span>
+      </div>
+
+      <ul class="batch-list" id="batchList" aria-live="polite"></ul>
+
+      <div class="batch-controls">
+        <label class="field">
+          <span class="field-label">Format</span>
+          <select id="batchFormat">
+            <option value="image/jpeg" selected>JPEG</option>
+            <option value="image/png">PNG</option>
+            <option value="image/webp">WebP</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Long edge (px)</span>
+          <select id="batchSize">
+            <option value="0">Full resolution</option>
+            <option value="4096">4096</option>
+            <option value="2560" selected>2560</option>
+            <option value="1920">1920</option>
+            <option value="1280">1280</option>
+          </select>
+        </label>
+        <label class="field" id="batchQualityField">
+          <span class="field-label">Quality <output id="batchQualityValue">92</output></span>
+          <input type="range" id="batchQuality" min="60" max="100" step="1" value="92" />
+        </label>
+      </div>
+
+      <div class="batch-progress" id="batchProgress" hidden>
+        <div class="batch-bar"><span id="batchBarFill"></span></div>
+        <span class="batch-status" id="batchStatus">—</span>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn" id="batchCancelBtn" type="button" hidden>Stop</button>
+      <button class="btn" data-close-modal type="button">Close</button>
+      <button class="btn" id="batchZipBtn" type="button" disabled>Download ZIP</button>
+      <button class="btn btn-primary" id="batchRunBtn" type="button" disabled>Develop all</button>
+    </footer>
+  </div>
+</div>
+
+<input type="file" id="batchInput" accept="image/*" multiple hidden />
+
+<!-- Shortcuts dialog -->
+<div class="modal" id="shortcutsModal" hidden>
+  <div class="modal-scrim" data-close-modal></div>
+  <div class="modal-card modal-card-sm" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+    <header class="modal-head">
+      <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
+      <button class="icon-btn" data-close-modal type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="modal-body">
+      <dl class="shortcut-list">
+        <div><dt>O</dt><dd>Open a photo</dd></div>
+        <div><dt>E</dt><dd>Export</dd></div>
+        <div><dt>R</dt><dd>Reset all adjustments</dd></div>
+        <div><dt>\</dt><dd>Hold to compare original</dd></div>
+        <div><dt>B</dt><dd>Toggle brush (local dodge &amp; burn)</dd></div>
+        <div><dt>Alt + drag</dt><dd>Erase the mask</dd></div>
+        <div><dt>[ ]</dt><dd>Brush size down / up</dd></div>
+        <div><dt>1 – 9</dt><dd>Pick a film stock</dd></div>
+        <div><dt>← →</dt><dd>Previous / next film stock</dd></div>
+        <div><dt>+ −</dt><dd>Zoom in / out</dd></div>
+        <div><dt>0</dt><dd>Fit to screen</dd></div>
+        <div><dt>⌘/Ctrl + Z</dt><dd>Undo</dd></div>
+        <div><dt>⇧⌘/Ctrl + Z</dt><dd>Redo</dd></div>
+        <div><dt>?</dt><dd>This panel</dd></div>
+        <div><dt>Esc</dt><dd>Close dialogs</dd></div>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

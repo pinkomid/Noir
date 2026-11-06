@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the workflow to publish to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; queue rather than cancel a live rollout.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Assemble site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the published site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          # Only the app ships; tests, tooling and config stay out of the build.
+          cp index.html _site/
+          cp -r styles _site/
+          cp -r js _site/
+          cp -r assets _site/
+          # No Jekyll processing — we serve the files exactly as written.
+          touch _site/.nojekyll
+
+      - name: Verify the build is self-contained
+        run: |
+          set -euo pipefail
+          # Guard against absolute paths, which break project-page subpaths.
+          if grep -rnE '(src|href)="/[^/]' _site/index.html; then
+            echo "::error::Found absolute asset paths; Pages serves from /<repo>/"
+            exit 1
+          fi
+          test -f _site/index.html
+          test -f _site/js/app.js
+          test -f _site/styles/main.css
+          echo "Site assembled: $(find _site -type f | wc -l) files"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
