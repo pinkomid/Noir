@@ -29,7 +29,7 @@ server is recommended so the ES modules and sample images load cleanly.
 
 ### Film stocks
 
-Twelve complete recipes, each a full parameter set rather than a one-tap filter.
+Twenty-four complete recipes — twelve darkroom stocks and twelve graphic lab processes — each a full parameter set rather than a one-tap filter.
 Pick one and keep adjusting — nothing is baked in.
 
 | Stock | Character |
@@ -53,6 +53,25 @@ A **light** and **dark** theme, toggle with <kbd>T</kbd> or the icon in the
 top bar. The choice is remembered, and the app follows your OS setting until
 you pick one. The print itself is never tinted — both themes keep it on a
 neutral mat so you are judging the photograph, not the UI.
+
+### Graphic effects
+
+The **Effects** tab holds the lab vocabulary: hard threshold, torn threshold,
+halftone screens, ordered and error-diffusion dithering, photocopy grime,
+risograph misregistration, line screens and print degradation. Thirteen in
+all, each with Amount, Cut point and Scale.
+
+Effects run **last** in the pipeline, after the tone curve, so the photograph
+underneath still decides the result. Turn Amount to zero to get the plain
+print back.
+
+### Twelve graphic stocks
+
+The rail has two families, separated by a rule. The **darkroom** stocks are
+film emulations. The **graphic lab** stocks are print processes — Xerox, hard
+light, torn edge, newsprint, 1-bit, fax, riso, decayed, burnt, weave,
+duotone and poster. They load an effect as well as tone, and the Effects tab
+opens with them so the look is a visible dial rather than a mystery.
 
 ### Crop & transform
 
@@ -81,9 +100,9 @@ mask all follow the print — and the exported file is the crop, not the negativ
 
 ### Adjustments
 
-The panel is split into four tabs — **Crop**, **Tone**, **Detail** and
-**Print** — so related controls sit together instead of competing for one
-long scroll.
+The panel is split into five tabs — **Crop**, **Tone**, **Detail**,
+**Effects** and **Print** — so related controls sit together instead of
+competing for one long scroll.
 
 - **Tone** — exposure (EV), contrast, highlights, shadows, whites, blacks
 - **Manual curve** — drag control points to reshape the print; click to add a
@@ -113,7 +132,7 @@ either as individual downloads or as a single ZIP — written by hand in
 - <kbd>\</kbd> (hold) or the **Compare** button to flash the untouched negative
 - <kbd>⌘/Ctrl</kbd> + scroll or <kbd>+</kbd> / <kbd>−</kbd> to zoom; drag to pan
 - <kbd>⌘/Ctrl Z</kbd> / <kbd>⇧⌘Z</kbd> for undo and redo
-- <kbd>1</kbd>–<kbd>9</kbd> jump between stocks, <kbd>←</kbd> <kbd>→</kbd> step through all twelve
+- <kbd>1</kbd>–<kbd>9</kbd> jump between stocks, <kbd>←</kbd> <kbd>→</kbd> step through the whole rail
 - <kbd>T</kbd> switches light / dark theme
 - <kbd>C</kbd> opens the crop frame, <kbd>M</kbd> mirrors, <kbd>Shift [</kbd> / <kbd>Shift ]</kbd> rotate 90°
 - <kbd>B</kbd> toggles the brush, <kbd>[</kbd> / <kbd>]</kbd> change its size, <kbd>Alt</kbd> erases
@@ -165,7 +184,8 @@ draft buffer for responsiveness, then a full-quality pass on release.
 index.html            markup and dialogs
 styles/main.css       the entire design system
 js/engine.js          canvas pipeline: LUT, grain field, toning, histogram
-js/presets.js         the twelve film stocks
+js/fx.js              graphic effects: threshold, halftone, dither, xerox, riso
+js/presets.js         the darkroom stocks and the graphic lab
 js/controls.js        adjustment panel schema (single source of truth for ranges)
 js/ui.js              DOM builders: rail, panel, curve editor, histogram, modals
 js/batch.js           batch runner and a dependency-free ZIP writer
@@ -187,12 +207,15 @@ npm test                        # engine + UI suites
 npm run build && node tools/test-deploy.mjs
 ```
 
-- `test-engine.mjs` — 71 checks: tonal math, grain, toning, export, the monotone
-  curve (including a monotonicity sweep), the dodge/burn mask, and the ZIP writer
-- `test-ui.mjs` — 114 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-engine.mjs` — 118 checks: tonal math, grain, toning, export, the monotone
+  curve (including a monotonicity sweep), the dodge/burn mask, the ZIP writer,
+  and the graphic effects (each one must leave both ink and paper and must
+  modulate with the image rather than render a uniform screen)
+- `test-ui.mjs` — 132 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
-  cancel, light/dark theme, reset, keyboard
+  cancel, the effects tab and its menu, loading a graphic stock,
+  light/dark theme, reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 

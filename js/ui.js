@@ -7,6 +7,7 @@
 
 import { GROUPS, TABS, formatValue, valueRatio, CURVE_POINTS } from './controls.js';
 import { TONES } from './presets.js';
+import { FX } from './fx.js';
 import { curveInterpolator } from './engine.js';
 import { isNeutralFrame } from './geometry.js';
 
@@ -39,8 +40,21 @@ export function el(tag, props = {}, children = []) {
 
 export function buildPresetRail(container, presets, thumbUrl, onSelect) {
   const buttons = new Map();
+  let lastFamily = null;
 
   for (const preset of presets) {
+    // The darkroom stocks and the graphic lab are different animals; a rule
+    // and a heading keep them from reading as one long confusing list.
+    const family = preset.family || 'darkroom';
+    if (family !== lastFamily) {
+      container.append(el('div', {
+        class: 'preset-divider',
+        'aria-hidden': 'true',
+        text: family === 'lab' ? 'Graphic lab' : 'Darkroom',
+      }));
+      lastFamily = family;
+    }
+
     const thumb = el('span', { class: 'preset-thumb', 'aria-hidden': 'true' });
     thumb.style.backgroundImage = `url("${thumbUrl}")`;
     if (preset.thumb) thumb.style.setProperty('--thumb-filter', preset.thumb);
@@ -316,21 +330,35 @@ function buildSlider(control, handlers) {
   return { row, input, valueEl };
 }
 
+/**
+ * Segmented control. The option list comes from the control's `source`,
+ * so the tone chemistry and the effect menu share one builder instead of
+ * each keeping a near-copy.
+ */
+const SEGMENTED_SOURCES = { tone: TONES, fx: FX };
+
 function buildSegmented(control, handlers) {
-  const buttons = TONES.map((tone) =>
+  const options = SEGMENTED_SOURCES[control.source || 'tone'] || TONES;
+
+  const buttons = options.map((option) =>
     el('button', {
       type: 'button',
-      text: tone.name,
-      'aria-pressed': String(tone.id === control.def),
-      dataset: { value: tone.id },
-      title: tone.name,
-      onclick: () => handlers.onChange(control.id, tone.id, { commit: true }),
+      text: option.name,
+      'aria-pressed': String(option.id === control.def),
+      dataset: { value: option.id },
+      title: option.hint || option.name,
+      onclick: () => handlers.onChange(control.id, option.id, { commit: true }),
     })
   );
 
   const row = el('div', { class: 'slider-row' }, [
     el('div', { class: 'slider-top' }, [el('span', { class: 'slider-label', text: control.label })]),
-    el('div', { class: 'segmented', role: 'group', 'aria-label': control.label }, buttons),
+    // Effects need a grid: thirteen entries do not fit a single scrolling row.
+    el('div', {
+      class: control.source === 'fx' ? 'segmented segmented-grid' : 'segmented',
+      role: 'group',
+      'aria-label': control.label,
+    }, buttons),
   ]);
 
   return { row, buttons };

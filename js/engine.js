@@ -15,6 +15,7 @@
  */
 
 import { drawFrame, frameSize, FRAME_DEFAULTS } from './geometry.js';
+import { apply as applyFX } from './fx.js';
 
 const PREVIEW_EDGE = 1600;   // interactive preview resolution (long edge)
 const GRAIN_FIELD = 512;     // noise field size for film grain
@@ -742,6 +743,14 @@ export class Darkroom {
 
         idx += 4;
       }
+    }
+
+    // 8 — graphic effects. Runs last, on the fully tonal-adjusted buffer, so
+    // an effect quantises the print you have actually built rather than the
+    // raw negative. Skipped while dragging a slider (opts.draftFX is not
+    // used here; the effect is cheap enough to keep live).
+    if (!opts.skipFX && p.fx && p.fx !== 'none') {
+      applyFX(null, data, w, h, p);
     }
 
     dctx.putImageData(img, 0, 0);

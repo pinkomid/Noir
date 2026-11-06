@@ -1161,6 +1161,36 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text-faint);
   transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
+/* Effects: a two-column grid. Thirteen entries in one scrolling row made
+   the interesting ones unreachable without swiping. */
+.preset-divider {
+  padding: 12px 2px 5px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+}
+.preset-divider:first-child {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 2px;
+}
+
+.segmented-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+.segmented-grid button {
+  flex: initial;
+  text-align: left;
+  padding: 5px 7px;
+  letter-spacing: 0.04em;
+}
+
 .segmented button:hover { color: var(--text-dim); }
 .segmented button[aria-pressed="true"] {
   background: var(--bg-active);

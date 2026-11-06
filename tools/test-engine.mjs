@@ -18,7 +18,7 @@ globalThis.document = {
 };
 
 const { Darkroom, curveInterpolator, isIdentityCurve, buildLUT } = await import('../js/engine.js');
-const { paramsFor, PRESETS } = await import('../js/presets.js');
+const { paramsFor, PRESETS, EFFECT_PRESETS } = await import('../js/presets.js');
 const { DEFAULTS } = await import('../js/controls.js');
 const { createZip } = await import('../js/batch.js');
 const geo = await import('../js/geometry.js');
@@ -533,6 +533,204 @@ PRESETS.slice(0, 12).forEach((preset, i) => {
   sctx.fillText(preset.name, x + 10, y + H - 13);
 });
 writeFileSync('tools/out/preset-sheet.png', sheet.toBuffer('image/png'));
+
+/* ------------------------------------------------------------------ */
+/* Graphic effects                                                     */
+/* ------------------------------------------------------------------ */
+
+// The 12 lab effects were built by rendering and looking, not by trusting the
+// maths — the first attempt used the already-crushed preset tone and every
+// threshold returned a black rectangle. These checks encode what "works"
+// meant, so a regression cannot pass silently.
+
+console.log('\ngraphic effects:');
+const { FX } = await import('../js/fx.js');
+
+// Neutral, well-exposed tone: a source the effects must be able to render.
+const FX_BASE = { ...DEFAULTS, contrast: 12, frame: geo.FRAME_DEFAULTS };
+
+function developFX(fxId, over = {}) {
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  engine.develop(ctx, W, H, { ...FX_BASE, fx: fxId, fxAmount: 100, fxLevel: 50, fxScale: 100, ...over });
+  return ctx.getImageData(0, 0, W, H).data;
+}
+
+/** White fraction per block, split 8×8, so flatness is measurable. */
+function blockStats(d, bw = W / 8, bh = H / 8) {
+  const fr = [];
+  for (let by = 0; by < 8; by++) {
+    for (let bx = 0; bx < 8; bx++) {
+      let white = 0;
+      let n = 0;
+      for (let y = Math.floor(by * bh); y < Math.floor((by + 1) * bh); y++) {
+        for (let x = Math.floor(bx * bw); x < Math.floor((bx + 1) * bw); x++) {
+          const i = (y * W + x) * 4;
+          if (d[i] > 128) white++;
+          n++;
+        }
+      }
+      fr.push(white / n);
+    }
+  }
+  const mean = fr.reduce((a, b) => a + b, 0) / fr.length;
+  const sd = Math.sqrt(fr.reduce((a, b) => a + (b - mean) ** 2, 0) / fr.length);
+  return { mean, sd };
+}
+
+const neutral = developFX('none');
+const neutralStats = blockStats(neutral);
+
+for (const fx of FX) {
+  if (fx.id === 'none') continue;
+  const d = developFX(fx.id);
+  const { mean, sd } = blockStats(d);
+
+  let white = 0;
+  for (let i = 0; i < W * H; i++) if (d[i * 4] > 128) white++;
+  const whiteFrac = white / (W * H);
+
+  // A working effect has to leave both ink and paper in the frame. All-black
+  // or all-white means the tone feeding it is wrong.
+  check(`${fx.id}: has both ink and paper`, whiteFrac > 0.02 && whiteFrac < 0.98,
+    `white ${(whiteFrac * 100).toFixed(1)}%`);
+
+  // ...and it has to MODULATE. A uniform screen scores near zero spread; a
+  // screen carrying a picture scores like the photograph does.
+  check(`${fx.id}: carries the image, not a uniform field`, sd > neutralStats.sd * 0.55,
+    `spread ${sd.toFixed(3)} vs photo ${neutralStats.sd.toFixed(3)}`);
+}
+
+// Screens must be genuinely two-tone, not a contrast bump.
+for (const id of ['threshold', 'halftone', 'dither', 'errorDiffuse', 'xerox']) {
+  const d = developFX(id);
+  let mid = 0;
+  for (let i = 0; i < W * H; i++) {
+    const v = d[i * 4];
+    if (v > 40 && v < 215) mid++;
+  }
+  check(`${id}: quantises to two tones`, mid / (W * H) < 0.06,
+    `${((mid / (W * H)) * 100).toFixed(1)}% intermediate`);
+}
+
+// The halftone dot must close in shadow. Sizing the radius against 0.5 instead
+// of the cell corner (0.707) leaves white pinholes in every dark cell.
+{
+  const d = developFX('halftone');
+  // Bottom-left corner of the portrait is deep shadow.
+  let white = 0;
+  let n = 0;
+  for (let y = Math.floor(H * 0.82); y < H; y++) {
+    for (let x = 0; x < Math.floor(W * 0.16); x++) {
+      if (d[(y * W + x) * 4] > 128) white++;
+      n++;
+    }
+  }
+  check('halftone dots close to solid in shadow', white / n < 0.14,
+    `${((white / n) * 100).toFixed(1)}% white in shadow`);
+}
+
+// Error diffusion used to fan: carried error on a monotonic sweep. Serpentine
+// scanning cancels most of it, so neighbouring rows must not correlate as
+// strongly as a directional ramp.
+{
+  const d = developFX('errorDiffuse');
+  const rowWhite = (y) => {
+    let c = 0;
+    for (let x = 0; x < W; x++) if (d[(y * W + x) * 4] > 128) c++;
+    return c / W;
+  };
+  // Compare a row with the one below it: diffusion must not produce the same
+  // pattern shifted by a pixel (that is the fan artefact).
+  let sameShift = 0;
+  let total = 0;
+  for (let y = 1; y < H; y += 7) {
+    if (Math.abs(rowWhite(y) - rowWhite(y - 1)) < 0.002) sameShift++;
+    total++;
+  }
+  check('diffusion does not collapse into a fan', sameShift / total < 0.5,
+    `${((sameShift / total) * 100).toFixed(0)}% near-identical adjacent rows`);
+}
+
+// Amount must be a real dial, and 0 must be a no-op.
+{
+  const off = developFX('halftone', { fxAmount: 0 });
+  let diff = 0;
+  for (let i = 0; i < W * H; i++) diff += Math.abs(off[i * 4] - neutral[i * 4]);
+  check('amount 0 leaves the print untouched', diff / (W * H) < 0.5,
+    `mean delta ${(diff / (W * H)).toFixed(2)}`);
+
+  // Blending one quantised result against the photograph cannot produce values
+  // that are BOTH different from the print and different from the effect unless
+  // the two disagree at that pixel. So measure the pixels where they disagree.
+  const full = developFX('halftone');
+  const half = developFX('halftone', { fxAmount: 50 });
+  let moved = 0;
+  let halfway = 0;
+  for (let i = 0; i < W * H; i++) {
+    const orig = neutral[i * 4];
+    const hard = full[i * 4];
+    if (Math.abs(hard - orig) < 60) continue;   // effect changed nothing here
+    moved++;
+    const got = half[i * 4];
+    const want = (orig + hard) / 2;
+    if (Math.abs(got - want) < 12) halfway++;
+  }
+  check('amount 50 blends the effect halfway',
+    moved > W * H * 0.02 && halfway / moved > 0.9,
+    `${((halfway / Math.max(1, moved)) * 100).toFixed(1)}% of ${moved} changed pixels at the midpoint`);
+}
+
+// Cut point must move the ink/paper balance in one direction.
+{
+  const low = developFX('threshold', { fxLevel: 20 });
+  const high = developFX('threshold', { fxLevel: 80 });
+  const whiteOf = (d) => {
+    let w = 0;
+    for (let i = 0; i < W * H; i++) if (d[i * 4] > 128) w++;
+    return w;
+  };
+  check('cut point controls how much goes white', whiteOf(low) > whiteOf(high),
+    `level 20 → ${whiteOf(low)}px, level 80 → ${whiteOf(high)}px`);
+}
+
+// Every lab preset must land somewhere usable.
+console.log('\ngraphic lab presets:');
+for (const preset of EFFECT_PRESETS) {
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const params = paramsFor(preset.id);
+  engine.develop(ctx, W, H, { ...params, frame: geo.FRAME_DEFAULTS });
+  const d = ctx.getImageData(0, 0, W, H).data;
+  let white = 0;
+  for (let i = 0; i < W * H; i++) if (d[i * 4] > 128) white++;
+  const { sd } = blockStats(d);
+  check(`${preset.id}: renders a usable print`,
+    white / (W * H) > 0.02 && white / (W * H) < 0.98 && sd > 0.08,
+    `white ${((white / (W * H)) * 100).toFixed(1)}%, spread ${sd.toFixed(3)}`);
+}
+
+// The whole lab family must survive the geometry path too — the effect is the
+// last stage of develop(), so a crop or rotate must not drop it.
+{
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const params = paramsFor('newsprint');
+  engine.develop(ctx, W, H, {
+    ...params,
+    frame: { ...geo.FRAME_DEFAULTS, rotation: 1, flipH: true },
+  }, { source: engine.source });
+  const d = ctx.getImageData(0, 0, W, H).data;
+  let mid = 0;
+  for (let i = 0; i < W * H; i++) {
+    const v = d[i * 4];
+    if (v > 40 && v < 215) mid++;
+  }
+  check('effects survive the export path with geometry',
+    mid / (W * H) < 0.06, `${((mid / (W * H)) * 100).toFixed(1)}% intermediate`);
+}
+
+
 
 writeFileSync('tools/out/export-full.jpg', full.toBuffer('image/jpeg', 0.92));
 

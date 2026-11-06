@@ -23,6 +23,7 @@ const modules = {
   'js/ui.js': readFileSync('js/ui.js', 'utf8'),
   'js/batch.js': readFileSync('js/batch.js', 'utf8'),
   'js/geometry.js': readFileSync('js/geometry.js', 'utf8'),
+  'js/fx.js': readFileSync('js/fx.js', 'utf8'),
   'js/app.js': readFileSync('js/app.js', 'utf8'),
 };
 
@@ -241,8 +242,12 @@ const appDebug = () => moduleCache.get('js/app.js').exports.debug;
 const app = new Proxy({}, { get: (_, key) => (typeof key === 'string' ? appDebug()[key] : undefined) });
 
 check('app boots without DOM errors', errors.length === 0, errors.map((e) => e.message).join(' | ').slice(0, 200));
-check('12 film stocks rendered', document.querySelectorAll('.preset').length === 12,
+check('24 stocks rendered (12 darkroom + 12 graphic lab)',
+  document.querySelectorAll('.preset').length === 24,
   `${document.querySelectorAll('.preset').length} buttons`);
+check('the rail is split into two named families',
+  document.querySelectorAll('.preset-divider').length === 2,
+  [...document.querySelectorAll('.preset-divider')].map((d) => d.textContent).join(' / '));
 check('adjustment controls rendered', document.querySelectorAll('.slider-row input[type=range]').length >= 12,
   `${document.querySelectorAll('.slider-row input[type=range]').length} sliders`);
 check('empty state is visible before a photo', !document.querySelector('#emptyState').hidden);
@@ -357,7 +362,7 @@ function openTabFor(selector) {
   return node;
 }
 
-check('panel renders a tab bar', document.querySelectorAll('.tab').length === 4,
+check('panel renders a tab bar', document.querySelectorAll('.tab').length === 5,
   `${document.querySelectorAll('.tab').length} tabs`);
 check('exactly one tab pane is visible',
   [...document.querySelectorAll('.tabpane')].filter((p) => !p.hidden).length === 1);
@@ -777,7 +782,7 @@ await wait(200);
 // --- Panel tabs --------------------------------------------------------
 console.log('\npanel tabs:');
 const tabButtons = [...document.querySelectorAll('.tab')];
-check('four tabs render', tabButtons.length === 4, tabButtons.map((t) => t.textContent).join(' / '));
+check('five tabs render', tabButtons.length === 5, tabButtons.map((t) => t.textContent).join(' / '));
 check('first tab is selected on boot',
   tabButtons.filter((t) => t.getAttribute('aria-selected') === 'true').length === 1);
 
@@ -824,6 +829,78 @@ await wait(120);
 check('escape closes the sheet', document.querySelector('#shortcutsModal').hidden === true);
 
 const failed = results.filter((r) => !r.ok);
+/* ------------------------------------------------------------------ */
+/* Graphic effects UI                                                  */
+/* ------------------------------------------------------------------ */
+
+console.log('\ngraphic effects panel:');
+
+const fxTab = document.querySelector('.tab[aria-controls="pane-fx"]');
+check('effects tab exists', !!fxTab, fxTab ? fxTab.textContent : 'missing');
+
+if (fxTab) fxTab.click();
+await wait(200);
+
+const fxGroup = document.querySelector('.group[data-group="fx"]');
+check('effects group is on the effects tab', !!fxGroup);
+const effectButtons = [...document.querySelectorAll('.group[data-group="fx"] .segmented-grid button')];
+check('effect menu renders every entry', effectButtons.length === 13,
+  `${effectButtons.length} entries`);
+
+const halftoneBtn = effectButtons.find((b) => b.dataset.value === 'halftone');
+check('halftone is offered', !!halftoneBtn);
+halftoneBtn.click();
+await wait(300);
+check('choosing an effect updates params', app.state.params.fx === 'halftone',
+  String(app.state.params.fx));
+check('the chosen effect is marked pressed',
+  halftoneBtn.getAttribute('aria-pressed') === 'true');
+check('only one effect is pressed at a time',
+  effectButtons.filter((b) => b.getAttribute('aria-pressed') === 'true').length === 1);
+
+const levelSlider = document.querySelector('.group[data-group="fx"] input[aria-label="Cut point"]');
+check('cut point slider exists', !!levelSlider);
+if (levelSlider) {
+  levelSlider.value = '20';
+  levelSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
+  levelSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(250);
+  check('cut point reaches params', Math.abs(app.state.params.fxLevel - 20) < 0.01,
+    String(app.state.params.fxLevel));
+}
+
+const amountSlider = document.querySelector('.group[data-group="fx"] input[aria-label="Amount"]');
+check('amount slider exists', !!amountSlider);
+if (amountSlider) {
+  amountSlider.value = '0';
+  amountSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
+  amountSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(250);
+  check('amount can be dialled to zero', Number(app.state.params.fxAmount) === 0,
+    String(app.state.params.fxAmount));
+}
+
+// A lab stock must load its effect, and reveal the tab that owns it.
+console.log('\ngraphic lab stocks:');
+const labStock = document.querySelector('.preset[data-id="newsprint"]');
+check('a graphic stock is in the rail', !!labStock);
+labStock.click();
+await wait(320);
+check('loading a graphic stock sets its effect', app.state.params.fx === 'halftone',
+  String(app.state.params.fx));
+check('loading a graphic stock keeps the crop and orientation',
+  app.state.params.frame.crop.w === 1 && app.state.params.frame.rotation === 0,
+  JSON.stringify(app.state.params.frame));
+check('the effects tab is open, so the look is a visible dial',
+  document.querySelector('.tab[aria-controls="pane-fx"]').getAttribute('aria-selected') === 'true');
+
+const beforeStep = app.state.presetId;
+window.dispatchEvent(Object.assign(new window.Event('keydown', { bubbles: true, cancelable: true }), { key: 'ArrowLeft' }));
+await wait(250);
+check('arrow keys cross from the darkroom into the lab',
+  app.state.presetId !== beforeStep,
+  `${beforeStep} → ${app.state.presetId}`);
+
 check('no uncaught errors during the session', errors.length === 0,
   errors.map((e) => e.message).join(' | ').slice(0, 240));
 

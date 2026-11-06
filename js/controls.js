@@ -76,6 +76,22 @@ export const GROUPS = [
     ],
   },
   {
+    id: 'fx',
+    tab: 'fx',
+    title: 'Graphic effects',
+    open: true,
+    controls: [
+      // Options are injected from fx.js so the menu and the renderer cannot
+      // drift apart; controls.js stays the single source of truth for the
+      // control, fx.js for what each entry does.
+      { id: 'fx', type: 'segmented', label: 'Effect', def: 'none', source: 'fx' },
+      { id: 'fxAmount', type: 'slider', label: 'Amount', min: 0, max: 100, step: 1, def: 100 },
+      { id: 'fxLevel', type: 'slider', label: 'Cut point', min: 0, max: 100, step: 1, def: 50 },
+      { id: 'fxScale', type: 'slider', label: 'Scale', min: 50, max: 400, step: 5, def: 100 },
+      { id: 'fxNote', type: 'note', label: 'Effects run after tone, so the curve and exposure still shape the picture underneath. Scale follows the print, not the screen.' },
+    ],
+  },
+  {
     id: 'toning',
     tab: 'finish',
     title: 'Toning',
@@ -136,6 +152,7 @@ export const TABS = [
   { id: 'crop', name: 'Crop', hint: 'Crop, rotate, mirror' },
   { id: 'tone', name: 'Tone', hint: 'Exposure and contrast' },
   { id: 'detail', name: 'Detail', hint: 'Structure and grain' },
+  { id: 'fx', name: 'Effects', hint: 'Xerox, halftone, dither, riso' },
   { id: 'finish', name: 'Print', hint: 'Toning, vignette, dodge & burn' },
 ];
 
