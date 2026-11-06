@@ -359,6 +359,7 @@ export class Darkroom {
     this.surface.height = this.surfaceH;
 
     const sctx = this.surface.getContext('2d');
+    sctx.resetTransform?.();
     sctx.setTransform(1, 0, 0, 1, 0, 0);
     sctx.globalCompositeOperation = 'source-over';
     sctx.globalAlpha = 1;
@@ -492,6 +493,18 @@ export class Darkroom {
    * @param {{ source?: HTMLCanvasElement, skipGrain?: boolean }} [opts]
    */
   develop(dctx, w, h, p, opts = {}) {
+    // Two sources, two very different jobs:
+    //
+    //   opts.source = the ORIGINAL negative. Geometry has not been applied
+    //                 to it yet, so drawFrame() must run. Used by export
+    //                 and batch, where the output is full resolution.
+    //
+    //   no source   = this.surface, which refreshSurface() already drew
+    //                 through the frame. It is a finished crop, so it must
+    //                 be blitted 1:1. Running drawFrame() on it too was
+    //                 applying crop/rotate/mirror twice, which stretched
+    //                 the preview and left the mirror looking dead.
+    const usesOriginal = !!opts.source;
     const source = opts.source || this.surface;
     if (!source) return;
 
@@ -499,13 +512,17 @@ export class Darkroom {
     dctx.globalCompositeOperation = 'source-over';
     dctx.globalAlpha = 1;
     dctx.clearRect(0, 0, w, h);
+    if (dctx.setTransform) dctx.setTransform(1, 0, 0, 1, 0, 0);
     dctx.imageSmoothingEnabled = true;
     dctx.imageSmoothingQuality = 'high';
 
-    // Geometry first: crop, quarter turns, mirrors and straightening all
-    // land in one transform so the rest of the pipeline is unaware of it.
-    const frame = p.frame || FRAME_DEFAULTS;
-    drawFrame(dctx, w, h, source, frame);
+    if (usesOriginal) {
+      // Geometry first: crop, quarter turns, mirrors and straightening all
+      // land in one transform so the rest of the pipeline is unaware of it.
+      drawFrame(dctx, w, h, source, p.frame || FRAME_DEFAULTS);
+    } else {
+      dctx.drawImage(source, 0, 0, w, h);
+    }
 
     const minEdge = Math.min(w, h);
 

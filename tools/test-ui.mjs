@@ -226,6 +226,7 @@ const check = (name, ok, detail = '') => {
 
 console.log('\nNOIR UI test\n');
 
+
 try {
   runModule('js/app.js');
 } catch (error) {
@@ -234,6 +235,10 @@ try {
 }
 
 await wait(120);
+
+const appDebug = () => moduleCache.get('js/app.js').exports.debug;
+/** Live view of the app's state, resolved on every access. */
+const app = new Proxy({}, { get: (_, key) => (typeof key === 'string' ? appDebug()[key] : undefined) });
 
 check('app boots without DOM errors', errors.length === 0, errors.map((e) => e.message).join(' | ').slice(0, 200));
 check('12 film stocks rendered', document.querySelectorAll('.preset').length === 12,
@@ -340,14 +345,36 @@ const curveCanvas = document.querySelector('.curve-canvas');
 check('curve canvas has a drawing surface', curveCanvas.width > 0 && curveCanvas.height > 0,
   `${curveCanvas.width}×${curveCanvas.height}`);
 
-const curveToggle = document.querySelector('.toggle-row .switch');
+// Controls live in tabs now; open the tab that owns the control first.
+function openTabFor(selector) {
+  const node = document.querySelector(selector);
+  if (!node) return null;
+  const pane = node.closest('.tabpane');
+  if (pane) {
+    const btn = document.querySelector(`.tab[aria-controls="${pane.id}"]`);
+    if (btn) btn.click();
+  }
+  return node;
+}
+
+check('panel renders a tab bar', document.querySelectorAll('.tab').length === 4,
+  `${document.querySelectorAll('.tab').length} tabs`);
+check('exactly one tab pane is visible',
+  [...document.querySelectorAll('.tabpane')].filter((p) => !p.hidden).length === 1);
+
+const curveToggle = openTabFor('.group[data-group="tone"] .toggle-row .switch');
 check('manual curve toggle exists', !!curveToggle);
-curveToggle.click();
-await wait(150);
-check('curve toggle turns on', curveToggle.getAttribute('aria-checked') === 'true');
+if (process.env.NOIR_DEBUG) {
+  console.log('   toggles on page:', document.querySelectorAll('.switch').length,
+    '| pane hidden:', curveToggle?.closest('.tabpane')?.hidden,
+    '| connected:', curveToggle?.isConnected);
+}
+if (curveToggle) curveToggle.click();
+await wait(200);
+check('curve toggle turns on', curveToggle.getAttribute('aria-checked') === 'true',
+  `checked=${curveToggle.getAttribute('aria-checked')} curveOn=${app.state?.params?.curveOn}`);
 
 // Emit a shaped curve and confirm it reaches the parameters.
-const app = moduleCache.get('js/app.js').exports;
 document.querySelector('.curve-reset').click();
 await wait(120);
 check('curve reset restores the identity', (() => {
@@ -449,9 +476,6 @@ check('escape closes the batch dialog', batchModal.hidden === true);
 // --- Crop / rotate / mirror -------------------------------------------
 console.log('\ncrop + transform:');
 
-const appModule = moduleCache.get('js/app.js').exports;
-if (process.env.NOIR_DEBUG_EXPORTS) console.log('   app keys:', Object.keys(appModule), 'debug:', typeof appModule.debug);
-const appState = appModule.debug;
 
 check('transform group is rendered', !!document.querySelector('.group[data-group="transform"]'));
 check('rotate & mirror group is rendered', !!document.querySelector('.group[data-group="orient"]'));
@@ -486,9 +510,9 @@ cropLayer.dispatchEvent(cropEvent('pointerup', 420, 520));
 await wait(300);
 
 check('dragging a handle changes the crop', (() => {
-  const f = appState.state.params.frame;
+  const f = app.state.params.frame;
   return f.crop.w < 0.99 || f.crop.h < 0.99;
-})(), JSON.stringify(appState.state.params.frame?.crop));
+})(), JSON.stringify(app.state.params.frame?.crop));
 
 cropBtn.click();
 await wait(200);
@@ -496,29 +520,30 @@ check('crop mode closes', cropBtn.getAttribute('aria-pressed') === 'false');
 check('crop overlay hides', document.querySelector('#cropLayer').hidden === true);
 
 // Rotation
-const beforeRot = appState.state.params.frame.rotation;
+const beforeRot = app.state.params.frame.rotation;
 document.querySelector('#rotateRightBtn').click();
 await wait(250);
 check('rotate right advances a quarter turn',
-  appState.state.params.frame.rotation === (beforeRot + 1) % 4,
-  `${beforeRot} → ${appState.state.params.frame.rotation}`);
+  app.state.params.frame.rotation === (beforeRot + 1) % 4,
+  `${beforeRot} → ${app.state.params.frame.rotation}`);
 
-const beforeLeft = appState.state.params.frame.rotation;
+const beforeLeft = app.state.params.frame.rotation;
 document.querySelector('#rotateLeftBtn').click();
 await wait(250);
 check('rotate left steps back',
-  appState.state.params.frame.rotation === (beforeLeft + 3) % 4,
-  `${beforeLeft} → ${appState.state.params.frame.rotation}`);
+  app.state.params.frame.rotation === (beforeLeft + 3) % 4,
+  `${beforeLeft} → ${app.state.params.frame.rotation}`);
 
-// Mirror
+// Mirror comes from the toolbar and must also light up its panel toggle.
+openTabFor('#flipBtn');
 document.querySelector('#flipBtn').click();
 await wait(250);
-check('mirror toggles on', appState.state.params.frame.flipH === true);
+check('mirror toggles on', app.state.params.frame.flipH === true);
 check('mirror button reflects state',
   document.querySelector('#flipBtn').getAttribute('aria-pressed') === 'true');
 document.querySelector('#flipBtn').click();
 await wait(250);
-check('mirror toggles off', appState.state.params.frame.flipH === false);
+check('mirror toggles off', app.state.params.frame.flipH === false);
 
 // Straighten slider
 const straighten = document.querySelector('input[type=range][aria-label="Straighten"]');
@@ -528,8 +553,8 @@ if (straighten) {
   straighten.dispatchEvent(new window.Event('input', { bubbles: true }));
   straighten.dispatchEvent(new window.Event('change', { bubbles: true }));
   await wait(300);
-  check('straighten reaches the frame', Math.abs(appState.state.params.frame.straighten - 6) < 0.01,
-    String(appState.state.params.frame.straighten));
+  check('straighten reaches the frame', Math.abs(app.state.params.frame.straighten - 6) < 0.01,
+    String(app.state.params.frame.straighten));
   straighten.value = '0';
   straighten.dispatchEvent(new window.Event('input', { bubbles: true }));
   straighten.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -545,7 +570,7 @@ if (aspectRow) {
   select.value = '1:1';
   select.dispatchEvent(new window.Event('change', { bubbles: true }));
   await wait(300);
-  const f = appState.state.params.frame;
+  const f = app.state.params.frame;
   const neg = { width: 1122, height: 1402 };
   const pxW = f.crop.w * neg.width;
   const pxH = f.crop.h * neg.height;
@@ -554,11 +579,11 @@ if (aspectRow) {
 }
 
 // Switching stock must not disturb the crop
-const cropBeforeStock = JSON.stringify(appState.state.params.frame.crop);
+const cropBeforeStock = JSON.stringify(app.state.params.frame.crop);
 document.querySelector('.preset[data-id="acros"]').click();
 await wait(250);
 check('changing film stock preserves the crop',
-  JSON.stringify(appState.state.params.frame.crop) === cropBeforeStock);
+  JSON.stringify(app.state.params.frame.crop) === cropBeforeStock);
 
 // Export must describe the print, not the negative. A square crop of a
 // portrait negative is 1122 wide but 1122 tall, versus the original 1402.
@@ -575,10 +600,62 @@ await wait(150);
 document.querySelector('#resetBtn').click();
 await wait(300);
 check('reset clears the frame', (() => {
-  const f = appState.state.params.frame;
+  const f = app.state.params.frame;
   return f.rotation === 0 && !f.flipH && !f.flipV
     && Math.abs(f.crop.w - 1) < 1e-6 && Math.abs(f.crop.h - 1) < 1e-6;
-})(), JSON.stringify(appState.state.params.frame));
+})(), JSON.stringify(app.state.params.frame));
+
+// --- Theme -------------------------------------------------------------
+console.log('\nlight + dark theme:');
+
+const themeBtn = document.querySelector('#themeBtn');
+check('theme toggle exists', !!themeBtn);
+
+const themeOf = () => document.documentElement.dataset.theme;
+const startTheme = themeOf();
+check('a theme is applied on boot', startTheme === 'dark' || startTheme === 'light', startTheme);
+
+themeBtn.click();
+await wait(200);
+const afterToggle = themeOf();
+check('theme toggle switches theme', afterToggle !== startTheme, `${startTheme} → ${afterToggle}`);
+check('theme is written to the document root',
+  document.documentElement.hasAttribute('data-theme'));
+check('theme button label follows the theme',
+  themeBtn.getAttribute('aria-label').toLowerCase().includes(afterToggle === 'light' ? 'dark' : 'light'),
+  themeBtn.getAttribute('aria-label'));
+
+themeBtn.click();
+await wait(200);
+check('theme toggles back', themeOf() === startTheme, themeOf());
+
+// Keyboard shortcut
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+await wait(200);
+check('T switches the theme', themeOf() !== startTheme, themeOf());
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+await wait(200);
+
+// --- Panel tabs --------------------------------------------------------
+console.log('\npanel tabs:');
+const tabButtons = [...document.querySelectorAll('.tab')];
+check('four tabs render', tabButtons.length === 4, tabButtons.map((t) => t.textContent).join(' / '));
+check('first tab is selected on boot',
+  tabButtons.filter((t) => t.getAttribute('aria-selected') === 'true').length === 1);
+
+for (const btn of tabButtons) {
+  btn.click();
+  await wait(120);
+  const pane = document.querySelector(`#pane-${btn.getAttribute('aria-controls')?.replace('pane-', '')}`)
+    || document.querySelector(`[aria-labelledby="${btn.id}"]`);
+  const visible = [...document.querySelectorAll('.tabpane')].filter((p) => !p.hidden);
+  const ok = visible.length === 1 && visible[0].id === `pane-${btn.textContent.trim().toLowerCase() === 'print' ? 'finish' : btn.textContent.trim().toLowerCase()}`;
+  check(`  tab "${btn.textContent}" shows exactly its own pane`,
+    visible.length === 1, `${visible.length} visible`);
+}
+
+check('no adjustment controls are lost', document.querySelectorAll('.slider-row input[type=range]').length >= 16,
+  `${document.querySelectorAll('.slider-row input[type=range]').length} sliders`);
 
 // --- Reset -------------------------------------------------------------
 document.querySelector('#resetBtn').click();

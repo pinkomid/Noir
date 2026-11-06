@@ -5,7 +5,7 @@
  * parameters and get told when the user changes one.
  */
 
-import { GROUPS, formatValue, valueRatio, CURVE_POINTS } from './controls.js';
+import { GROUPS, TABS, formatValue, valueRatio, CURVE_POINTS } from './controls.js';
 import { TONES } from './presets.js';
 import { curveInterpolator } from './engine.js';
 import { isNeutralFrame } from './geometry.js';
@@ -98,6 +98,59 @@ export function buildPresetRail(container, presets, thumbUrl, onSelect) {
 export function buildPanel(container, handlers) {
   const rows = new Map();      // id → { row, input, valueEl, control, group }
   const groups = new Map();    // id → { node, dot }
+  const panes = new Map();     // tab id → element
+
+  // Tab bar first, so related controls stop competing for the same scroll.
+  const tabBar = el('div', { class: 'tabbar', role: 'tablist', 'aria-label': 'Adjustment sections' });
+  const tabButtons = new Map();
+
+  for (const tab of TABS) {
+    const button = el('button', {
+      class: 'tab',
+      type: 'button',
+      role: 'tab',
+      id: `tab-${tab.id}`,
+      'aria-selected': 'false',
+      'aria-controls': `pane-${tab.id}`,
+      title: tab.hint,
+      text: tab.name,
+    });
+    button.addEventListener('click', () => selectTab(tab.id));
+    tabButtons.set(tab.id, button);
+    tabBar.append(button);
+
+    const pane = el('div', {
+      class: 'tabpane',
+      role: 'tabpanel',
+      id: `pane-${tab.id}`,
+      'aria-labelledby': `tab-${tab.id}`,
+      dataset: { tab: tab.id },
+    });
+    panes.set(tab.id, pane);
+  }
+
+  container.append(tabBar);
+  for (const pane of panes.values()) container.append(pane);
+
+  function selectTab(id) {
+    const target = panes.has(id) ? id : TABS[0].id;
+    for (const [key, button] of tabButtons) {
+      const on = key === target;
+      button.setAttribute('aria-selected', String(on));
+      button.tabIndex = on ? 0 : -1;
+    }
+    for (const [key, pane] of panes) {
+      pane.hidden = key !== target;
+    }
+    try { localStorage.setItem('noir.tab', target); } catch { /* ignore */ }
+  }
+
+  let initialTab = TABS[0].id;
+  try {
+    const saved = localStorage.getItem('noir.tab');
+    if (saved && panes.has(saved)) initialTab = saved;
+  } catch { /* ignore */ }
+  selectTab(initialTab);
 
   for (const group of GROUPS) {
     const body = el('div', { class: 'group-body' }, [el('div')]);
@@ -157,7 +210,8 @@ export function buildPanel(container, handlers) {
     }
 
     groups.set(group.id, { node, dot });
-    container.append(node);
+    const pane = panes.get(group.tab) || panes.get(TABS[0].id);
+    pane.append(node);
   }
 
   return {
@@ -212,8 +266,17 @@ export function buildPanel(container, handlers) {
     openGroup(id, open = true) {
       const group = groups.get(id);
       if (!group) return;
+      // Revealing a group in another tab must bring that tab forward,
+      // otherwise the caller thinks it opened something invisible.
+      const owner = GROUPS.find((g) => g.id === id);
+      if (open && owner && owner.tab) selectTab(owner.tab);
       group.node.dataset.open = String(open);
       group.node.querySelector('.group-head').setAttribute('aria-expanded', String(open));
+    },
+
+    selectTab,
+    get activeTab() {
+      return [...panes.entries()].find(([, p]) => !p.hidden)?.[0] || TABS[0].id;
     },
   };
 }
@@ -287,16 +350,20 @@ function buildToggle(control, handlers) {
     switchEl,
   ]);
 
+  // Optimistic paint, then let the owner re-sync from state. The row itself
+  // drives the toggle and the inner button only passes the click through, so
+  // one user click can never be counted twice.
   const flip = () => {
     const next = switchEl.getAttribute('aria-checked') !== 'true';
     switchEl.setAttribute('aria-checked', String(next));
     handlers.onChange(control.id, next, { commit: true });
   };
 
-  switchEl.addEventListener('click', flip);
-  row.addEventListener('click', (event) => {
-    if (event.target !== switchEl) flip();
+  switchEl.addEventListener('click', (event) => {
+    event.stopPropagation();
+    flip();
   });
+  row.addEventListener('click', flip);
 
   return { row, switch: switchEl };
 }

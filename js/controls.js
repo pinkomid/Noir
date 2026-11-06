@@ -17,6 +17,7 @@ export const CURVE_POINTS = [
 export const GROUPS = [
   {
     id: 'transform',
+    tab: 'crop',
     title: 'Crop & transform',
     open: true,
     controls: [
@@ -39,6 +40,7 @@ export const GROUPS = [
   },
   {
     id: 'tone',
+    tab: 'tone',
     title: 'Tone',
     open: true,
     controls: [
@@ -54,6 +56,7 @@ export const GROUPS = [
   },
   {
     id: 'density',
+    tab: 'detail',
     title: 'Density & structure',
     open: true,
     controls: [
@@ -64,8 +67,9 @@ export const GROUPS = [
   },
   {
     id: 'grain',
+    tab: 'detail',
     title: 'Grain',
-    open: false,
+    open: true,
     controls: [
       { id: 'grain', type: 'slider', label: 'Amount', min: 0, max: 100, step: 1, def: 0 },
       { id: 'grainSize', type: 'slider', label: 'Size', min: 0.8, max: 3, step: 0.05, def: 1.6, digits: 2 },
@@ -73,8 +77,9 @@ export const GROUPS = [
   },
   {
     id: 'toning',
+    tab: 'finish',
     title: 'Toning',
-    open: false,
+    open: true,
     controls: [
       { id: 'tone', type: 'segmented', label: 'Chemistry', def: 'neutral' },
       { id: 'toneStrength', type: 'slider', label: 'Strength', min: 0, max: 100, step: 1, def: 0 },
@@ -82,6 +87,7 @@ export const GROUPS = [
   },
   {
     id: 'mix',
+    tab: 'finish',
     title: 'Channel mix',
     open: false,
     controls: [
@@ -93,6 +99,7 @@ export const GROUPS = [
   },
   {
     id: 'local',
+    tab: 'finish',
     title: 'Local dodge & burn',
     open: false,
     controls: [
@@ -103,16 +110,18 @@ export const GROUPS = [
   },
   {
     id: 'frame',
-    title: 'Frame & finish',
-    open: false,
+    tab: 'finish',
+    title: 'Vignette',
+    open: true,
     controls: [
       { id: 'vignette', type: 'slider', label: 'Vignette', min: -100, max: 100, step: 1, def: 0 },
     ],
   },
   {
     id: 'orient',
+    tab: 'crop',
     title: 'Rotate & mirror',
-    open: false,
+    open: true,
     controls: [
       { id: 'rotateLeft', type: 'action', label: 'Rotate left 90°', def: null },
       { id: 'rotateRight', type: 'action', label: 'Rotate right 90°', def: null },
@@ -120,6 +129,14 @@ export const GROUPS = [
       { id: 'flipV', type: 'toggle', label: 'Mirror vertically', def: false },
     ],
   },
+];
+
+/** Ordered tabs for the panel. Each groups related controls together. */
+export const TABS = [
+  { id: 'crop', name: 'Crop', hint: 'Crop, rotate, mirror' },
+  { id: 'tone', name: 'Tone', hint: 'Exposure and contrast' },
+  { id: 'detail', name: 'Detail', hint: 'Structure and grain' },
+  { id: 'finish', name: 'Print', hint: 'Toning, vignette, dodge & burn' },
 ];
 
 export const ALL_CONTROLS = GROUPS.flatMap((g) =>
