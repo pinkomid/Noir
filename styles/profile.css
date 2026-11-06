@@ -1,0 +1,614 @@
+/* ============================================================
+   NOIR Studio — split workspace and the profile editor pane
+   ------------------------------------------------------------
+   Two panes side by side: the profile editor on the left, the photo
+   darkroom on the right. The photo pane is NOIR unchanged; it only knows
+   it is narrower, because its layout keys off the viewport, and the
+   viewport is the whole screen.
+
+   Colours come from main.css's semantic tokens, so the light/dark theme
+   switch affects both panes rather than leaving one permanently dark.
+   ============================================================ */
+
+/* ---- The split ---------------------------------------------------- */
+
+.workspace-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.workspace-split {
+  display: grid;
+  /* The profile pane is a form; the photo pane is a canvas. The canvas wins
+     the width, but the form gets a floor it can still be typed in. */
+  grid-template-columns: clamp(360px, 40%, 600px) minmax(0, 1fr);
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* A seam between the panes, drawn as a border on the left one so the two
+   never double up. */
+.pane-profile {
+  border-right: 1px solid var(--line-strong);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 18px;
+  padding-top: env(safe-area-inset-top, 0px);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-bar);
+  flex: none;
+}
+
+.pane-title { min-width: 0; }
+
+.pane-title h1,
+.pane-title h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-title p {
+  margin: 1px 0 0;
+  font-size: 11px;
+  color: var(--text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-badge {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The photo pane hands its height to NOIR's own grid, which expects to fill
+   the viewport. Only the grid stretches: the top bar, the status bar and the
+   modal layer keep their own sizes. */
+.pane-body-photo {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-body-photo > .topbar,
+.pane-body-photo > .statusbar {
+  flex: none;
+}
+
+.pane-body-photo > .workspace {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Profile editor layout ---------------------------------------- */
+
+#profilePanel {
+  /* flex-wrap rather than a grid: two 300px columns sit side by side in a
+     wide pane and stack in a narrow one, with no breakpoint to keep in sync
+     with the pane's own width. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pp-form {
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: 16px 18px 40px;
+  border-right: 1px solid var(--line);
+}
+
+.pp-result {
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: 16px 18px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Form --------------------------------------------------------- */
+
+.pp-section {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pp-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.pp-section h3 {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pp-section h3 em {
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 10px;
+  color: var(--text-mute);
+  margin-left: auto;
+  text-align: right;
+}
+
+.pp-field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.pp-field > span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.pp-field > span em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 16px keeps iOS from zooming the page when a field is focused. */
+.pp-field input[type="text"],
+.pp-field textarea,
+.pp-field select {
+  width: 100%;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+@media (pointer: fine) {
+  .pp-field input[type="text"],
+  .pp-field textarea,
+  .pp-field select { font-size: 13px; }
+}
+
+.pp-field input[type="text"]:focus,
+.pp-field textarea:focus,
+.pp-field select:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.pp-field textarea {
+  resize: vertical;
+  min-height: 54px;
+}
+
+.pp-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pp-slider {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.pp-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 22px;
+}
+
+.pp-slider output {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text);
+  text-align: right;
+}
+
+.pp-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.pp-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.pp-check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.pp-hint {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-mute);
+}
+
+.pp-hint code {
+  font-size: 10px;
+  background: var(--bg-inset);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.pp-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pp-template {
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 12px;
+  min-height: 32px;
+  color: var(--text-dim);
+  background: var(--btn-bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.pp-template:hover {
+  color: var(--text);
+  border-color: var(--line-hover);
+}
+
+.pp-template:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- The card: what the profile will look like -------------------- */
+
+.pp-card {
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 16px 18px 20px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(178, 58, 126, 0.12), transparent 65%),
+    var(--bg-panel);
+  min-height: 300px;
+}
+
+.pp-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.pp-card-head h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-tag {
+  margin-left: auto;
+  flex: none;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.pp-rule {
+  height: 2px;
+  border-radius: 2px;
+  margin-bottom: 14px;
+  background: linear-gradient(90deg, #e9c4d6, #b23a7e, #8464ce);
+}
+
+/* The profile text is proportional in the game, not monospaced — centring is
+   done with spaces, so the preview has to use the same kind of font to look
+   centred at all. */
+.pp-preview {
+  margin: 0;
+  font: 13px/1.85 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  min-height: 240px;
+}
+
+/* ---- Stats, checks, actions --------------------------------------- */
+
+.pp-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-inset);
+}
+
+.pp-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pp-checks li {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+}
+
+.pp-checks li span {
+  flex: none;
+  width: 12px;
+  text-align: center;
+}
+
+.pp-ok { color: var(--ok, #9fe0b8); }
+.pp-bad { color: var(--danger, #ffb4c8); }
+
+.pp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pp-btn {
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  padding: 9px 14px;
+  min-height: 38px;
+  color: var(--text);
+  background: var(--btn-bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.pp-btn:hover {
+  border-color: var(--line-hover);
+  background: var(--btn-bg-1-hover);
+}
+
+.pp-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pp-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pp-btn-primary {
+  background: var(--btn-primary-1);
+  color: var(--text-invert);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.pp-btn-primary:hover {
+  background: var(--btn-primary-2);
+}
+
+.pp-privacy {
+  margin: 0;
+  text-align: center;
+}
+
+/* ---- Pane switcher: phone only ------------------------------------ */
+
+.pane-switch {
+  display: none;
+  flex: none;
+  gap: 6px;
+  padding: 8px 10px;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  background: var(--bg-bar);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.pane-switch button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--text-mute);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.pane-switch button[aria-selected="true"] {
+  color: var(--text);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* ---- NOIR inside a pane -------------------------------------------
+   NOIR's phone rules live behind a viewport width query, and the viewport
+   here is the whole screen, so at half width it keeps its three desktop
+   columns in a space that cannot hold them. These rules give the photo
+   pane the narrow layout based on its own width instead.
+   ------------------------------------------------------------------ */
+
+.pane-photo .topbar {
+  border-radius: 0;
+}
+
+/* NOIR's three columns need about 940px: a 232px rail of film stocks, the
+   print, and a 348px panel of controls. The pane is narrower than that on any
+   ordinary screen, so the rail and panel are trimmed here rather than letting
+   the print be squeezed to nothing. Custom properties inherit, and .workspace
+   is a descendant of the pane, so setting them on the pane reaches the grid. */
+.pane-photo { --rail-w: 176px; --panel-w: 300px; }
+
+/* NOIR sizes its grid from the viewport because it used to *be* the page.
+   Inside a pane that number is wrong, so it fills its container instead. */
+.pane-photo .workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Narrow panes drop the rail's histogram and detail lines, which are the
+   first things that stop being legible. */
+.pane-photo .histogram-wrap { display: none; }
+.pane-photo .film-detail { display: none; }
+
+/* ---- Responsive --------------------------------------------------- */
+
+/* When the two columns wrap, the seam has to move with them. */
+@media (max-width: 1180px) {
+  .workspace-split { grid-template-columns: clamp(340px, 42%, 520px) minmax(0, 1fr); }
+}
+
+/* Phone: one pane at a time, chosen by the switcher. */
+@media (max-width: 860px) {
+  .pane-switch { display: flex; }
+
+  .workspace-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pane-profile {
+    border-right: none;
+  }
+
+  /* Only the active pane is in the layout, so the hidden one does not
+     reserve space or steal scroll. */
+  body[data-pane="profile"] .pane-photo { display: none; }
+  body[data-pane="photo"] .pane-profile { display: none; }
+
+  .pane-head { min-height: 48px; padding: 0 14px; }
+  .pane-title h1,
+  .pane-title h2 { font-size: 15px; }
+  .pane-title p { display: none; }
+
+  #profilePanel { height: 100%; overflow-y: auto; }
+
+  /* On a phone the preview is what you are checking, so it sits above the
+     form instead of being buried under it. */
+  .pp-form, .pp-result { flex: 1 1 100%; }
+  .pp-form { border-right: none; padding-bottom: 60px; }
+
+  .pp-result {
+    order: -1;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+  }
+
+  .pp-preview { min-height: 140px; }
+
+  /* Touch targets. */
+  .pp-btn { min-height: 44px; }
+  .pp-template { min-height: 40px; }
+  .pp-slider input[type="range"] { height: 34px; }
+  .pp-check input { width: 20px; height: 20px; }
+  .pp-field select,
+  .pp-field input[type="text"] { min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  .pp-row { grid-template-columns: minmax(0, 1fr); }
+  .pane-switch button span { font-size: 11px; }
+  .pp-form, .pp-result { padding: 12px 12px 32px; }
+}

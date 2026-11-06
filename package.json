@@ -2,15 +2,16 @@
   "name": "noir-photo-studio",
   "version": "1.0.0",
   "private": true,
-  "description": "NOIR Photo Studio \u2014 a private, in-browser black & white darkroom.",
+  "description": "NOIR Studio \u2014 a private, in-browser black & white darkroom next to a 3DXChat profile editor.",
   "type": "module",
   "scripts": {
     "dev": "python3 -m http.server 5173 --bind 0.0.0.0",
     "start": "python3 -m http.server 5173 --bind 0.0.0.0",
-    "test": "node tools/test-engine.mjs && node tools/test-ui.mjs",
+    "test": "node tools/test-engine.mjs && node tools/test-profile.mjs && node tools/test-ui.mjs",
     "test:engine": "node tools/test-engine.mjs",
     "test:ui": "node tools/test-ui.mjs",
-    "build": "rm -rf _site && mkdir -p _site && cp index.html _site/ && cp -r styles js assets _site/ && touch _site/.nojekyll"
+    "test:profile": "node tools/test-profile.mjs",
+    "build": "rm -rf _site && mkdir -p _site && cp index.html _site/ && cp -r styles js assets project _site/ && touch _site/.nojekyll"
   },
   "keywords": [
     "photography",

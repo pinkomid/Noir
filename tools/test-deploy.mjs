@@ -97,6 +97,63 @@ const modules = readdirSync(jsDir).filter((f) => f.endsWith('.js'));
 const orphans = modules.filter((f) => f !== 'app.js' && !imported.has(f));
 check('every module is reachable from an entry point', orphans.length === 0, orphans.join(', ') || 'none');
 
+/* ---- 4b. The profile pane ships too -------------------------------- */
+
+/*
+ * `project/` is a second source tree. A build step that copies `js/` but not
+ * `project/` produces a site that loads and then throws on a missing module,
+ * which no path check above would notice because the tag itself resolves.
+ */
+const projectDir = join('project');
+const projectFiles = [];
+(function walkProject(dir) {
+  if (!existsSync(dir)) return;
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walkProject(full);
+    else projectFiles.push(full);
+  }
+})(projectDir);
+
+check('the profile editor source exists', projectFiles.length > 0,
+  `${projectFiles.length} files`);
+
+const projectMissing = projectFiles.filter((f) => !files.includes(join(site, f)));
+check('every profile-editor file is published', projectMissing.length === 0,
+  projectMissing.join(', '));
+
+check('the profile stylesheet is published',
+  files.includes(join(site, 'styles', 'profile.css')));
+
+check('the shell is the page\'s only entry point',
+  (html.match(/<script type="module"/g) || []).length === 1,
+  'a second script tag would boot the darkroom twice');
+
+/* Every module the shell imports must resolve inside the published tree. */
+const shellPath = join(site, 'project', 'shell.js');
+const shellMissing = [];
+if (existsSync(shellPath)) {
+  const shellSrc = readFileSync(shellPath, 'utf8');
+  for (const m of shellSrc.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+    checkRef(shellPath, m[1]);
+  }
+  // Side-effect imports too — that is how app.js is reached.
+  for (const m of shellSrc.matchAll(/import\s+['"](\.[^'"]+)['"]/g)) {
+    checkRef(shellPath, m[1]);
+  }
+}
+check('every module the shell imports ships', shellMissing.length === 0, shellMissing.join(', '));
+
+check('no profile-editor file is a root-absolute reference',
+  projectFiles.every((f) => {
+    const code = readFileSync(f, 'utf8');
+    return !/(?:src|href)="\/[^/]/.test(code) && !/from\s+'\/[^.]/.test(code);
+  }), 'the site is served from a /Noir-Photo-Studio/ subpath');
+
+check('the zip upload is not published',
+  !files.some((f) => f.endsWith('.zip')),
+  'a 2MB archive of unrelated drafts does not belong on the site');
+
 /* ---- 5. Progressive hardening -------------------------------------- */
 check('page declares a language', /<html[^>]+lang=/.test(html));
 check('responsive viewport is declared', /name="viewport"/.test(html));
