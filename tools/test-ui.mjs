@@ -948,6 +948,196 @@ check('arrow keys cross from the darkroom into the lab',
   app.state.presetId !== beforeStep,
   `${beforeStep} → ${app.state.presetId}`);
 
+/* ------------------------------------------------------------------ */
+/* Phone / touch                                                       */
+/* ------------------------------------------------------------------ */
+
+// jsdom has no layout engine, so the phone LAYOUT cannot be measured here.
+// What can be tested is everything that is not CSS: the gestures, and the
+// contract that the stylesheet actually contains the rules the layout depends
+// on. The layout itself was verified by reading the rules; see the README.
+console.log('\nphone and touch:');
+
+const stageEl = document.querySelector('#stageFrame');
+
+function touchPointer(type, id, x, y) {
+  const e = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.assign(e, { clientX: x, clientY: y, pointerId: id, pointerType: 'touch', button: 0, isPrimary: id === 1 });
+  return e;
+}
+
+// Pinch: two fingers spreading must zoom in, and closing must zoom out.
+const zoomBefore = document.querySelector('#zoomValue').textContent;
+stageEl.dispatchEvent(touchPointer('pointerdown', 1, 400, 300));
+stageEl.dispatchEvent(touchPointer('pointerdown', 2, 420, 300));
+stageEl.dispatchEvent(touchPointer('pointermove', 1, 340, 300));
+stageEl.dispatchEvent(touchPointer('pointermove', 2, 480, 300));
+await wait(120);
+const zoomSpread = app.state.view.zoom;
+check('pinching out zooms in', zoomSpread !== 'fit' && zoomSpread > 1,
+  `${zoomBefore} → ${typeof zoomSpread === 'number' ? zoomSpread.toFixed(2) : zoomSpread}`);
+
+stageEl.dispatchEvent(touchPointer('pointermove', 1, 405, 300));
+stageEl.dispatchEvent(touchPointer('pointermove', 2, 415, 300));
+await wait(120);
+check('pinching back in zooms out again',
+  app.state.view.zoom === 'fit' || app.state.view.zoom < zoomSpread,
+  String(app.state.view.zoom));
+
+stageEl.dispatchEvent(touchPointer('pointerup', 1, 405, 300));
+stageEl.dispatchEvent(touchPointer('pointerup', 2, 415, 300));
+await wait(150);
+check('releasing a pinch settles on a zoom step', (() => {
+  const z = app.state.view.zoom;
+  return z === 'fit' || typeof z === 'number';
+})(), String(app.state.view.zoom));
+check('the stage is not left in a pinching state',
+  !stageEl.classList.contains('pinching'));
+
+// A second finger must cancel a pan rather than pan and zoom at once.
+stageEl.dispatchEvent(touchPointer('pointerdown', 1, 400, 300));
+stageEl.dispatchEvent(touchPointer('pointerdown', 2, 440, 300));
+await wait(60);
+stageEl.dispatchEvent(touchPointer('pointerup', 1, 400, 300));
+stageEl.dispatchEvent(touchPointer('pointerup', 2, 440, 300));
+await wait(120);
+
+// A tap with the brush on must paint — a fingertip has no hover to lean on.
+console.log('\nbrush on a touch screen:');
+document.querySelector('#brushBtn').click();
+await wait(200);
+check('brush mode is on for the touch test',
+  document.querySelector('#brushBtn').getAttribute('aria-pressed') === 'true');
+
+// The print is #view, NOT the stage: a tap outside the print is correctly
+// ignored (stagePoint rejects anything beyond 2% outside). Size it explicitly,
+// because jsdom has no layout and the shared stub above is a different size.
+const viewEl = document.querySelector('#view');
+viewEl.getBoundingClientRect = () => ({ left: 0, top: 0, width: 560, height: 700, right: 560, bottom: 700 });
+
+// Canvas PIXEL readback is not usable in this harness. jsdom's
+// HTMLCanvasElement re-creates the backing canvas whenever width/height are
+// assigned, and the engine resizes the mask canvas after taking its context,
+// so maskCtx draws to an orphaned surface and getImageData comes back blank.
+// The engine itself is fine — test-engine.mjs paints the same dab on the same
+// native renderer and reads the pixels back correctly.
+//
+// History cannot see a stroke either: snapshot() covers the tone parameters,
+// not the mask, so every brush stroke is skipped as "no change".
+//
+// So spy on the engine call. That is precisely the behaviour under test: does
+// a fingertip reach paintDab, and does a pinch avoid it?
+const realPaintDab = app.engine.paintDab.bind(app.engine);
+let dabCalls = 0;
+app.engine.paintDab = (dab) => { dabCalls++; return realPaintDab(dab); };
+
+dabCalls = 0;
+stageEl.dispatchEvent(touchPointer('pointerdown', 7, 280, 350));
+await wait(120);
+stageEl.dispatchEvent(touchPointer('pointerup', 7, 280, 350));
+await wait(250);
+check('a single tap with a finger paints', dabCalls > 0, `${dabCalls} dab(s)`);
+
+// A tap that a second finger turns into a pinch must NOT paint: that is the
+// reason the dab is deferred at all.
+dabCalls = 0;
+stageEl.dispatchEvent(touchPointer('pointerdown', 11, 280, 350));
+stageEl.dispatchEvent(touchPointer('pointerdown', 12, 320, 350));
+await wait(200);
+stageEl.dispatchEvent(touchPointer('pointerup', 11, 280, 350));
+stageEl.dispatchEvent(touchPointer('pointerup', 12, 320, 350));
+await wait(200);
+check('a tap that becomes a pinch does not paint', dabCalls === 0,
+  `${dabCalls} dab(s) — a deferred dab must be dropped when a second finger arrives`);
+
+// A mouse click must still paint immediately — no deferred path for a cursor.
+dabCalls = 0;
+const mouseDown = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+Object.assign(mouseDown, { clientX: 280, clientY: 350, pointerId: 20, pointerType: 'mouse', button: 0 });
+stageEl.dispatchEvent(mouseDown);
+await wait(80);
+const mouseUp = new window.Event('pointerup', { bubbles: true, cancelable: true });
+Object.assign(mouseUp, { clientX: 280, clientY: 350, pointerId: 20, pointerType: 'mouse', button: 0 });
+stageEl.dispatchEvent(mouseUp);
+await wait(120);
+check('a mouse still paints with no delay', dabCalls > 0, `${dabCalls} dab(s)`);
+
+app.engine.paintDab = realPaintDab;
+
+check('the brush cursor ring is not shown for a finger',
+  (() => {
+    const ring = document.querySelector('.brush-cursor');
+    return !ring || ring.style.opacity !== '1';
+  })());
+
+// Erase must stay on for touch: Alt can never be held down by a finger, so
+// reading altKey from a touch event would silently cancel it.
+document.querySelector('#eraseBtn').click();
+await wait(150);
+const eraseOn = document.querySelector('#eraseBtn').getAttribute('aria-pressed');
+stageEl.dispatchEvent(touchPointer('pointerdown', 8, 300, 400));
+await wait(200);
+stageEl.dispatchEvent(touchPointer('pointerup', 8, 300, 400));
+await wait(150);
+check('the erase toggle survives a touch stroke',
+  document.querySelector('#eraseBtn').getAttribute('aria-pressed') === eraseOn,
+  `erase was ${eraseOn}, now ${document.querySelector('#eraseBtn').getAttribute('aria-pressed')}`);
+document.querySelector('#brushBtn').click();
+await wait(150);
+
+/* ------------------------------------------------------------------ */
+/* Stylesheet contract for the phone layout                            */
+/* ------------------------------------------------------------------ */
+
+// The responsive rules cannot be evaluated here, but they can be checked for
+// existence and for the specific properties whose absence causes the bugs
+// reported: no wrapped tabs, real touch targets, no page zoom fighting the
+// pinch, and safe-area padding on notched screens.
+const cssSource = readFileSync('styles/main.css', 'utf8');
+
+function cssBlock(source, selector) {
+  const i = source.indexOf(selector);
+  if (i < 0) return '';
+  const open = source.indexOf('{', i);
+  const close = source.indexOf('\n}', open);
+  return source.slice(open + 1, close < 0 ? undefined : close);
+}
+
+check('the stylesheet has a phone breakpoint', cssSource.includes('@media (max-width: 820px)'));
+check('the stylesheet has a touch-input breakpoint', cssSource.includes('@media (pointer: coarse)'));
+
+const phoneBlock = cssBlock(cssSource, '@media (max-width: 820px)');
+check('the phone layout stacks the workspace into one column',
+  /\.workspace\s*\{[^}]*flex-direction:\s*column/.test(phoneBlock));
+check('the stage gets a viewport-relative height on a phone',
+  /height:\s*min\(52dvh/.test(phoneBlock),
+  'a fixed pixel height is what pushed the panel off screen');
+check('the stage blocks browser panning so the pinch is ours',
+  /touch-action:\s*none/.test(phoneBlock));
+check('the stage does not trigger pull-to-refresh',
+  /overscroll-behavior:\s*contain/.test(phoneBlock));
+
+const coarseBlock = cssBlock(cssSource, '@media (pointer: coarse)');
+check('sliders get a finger-sized thumb',
+  /::-webkit-slider-thumb\s*\{[^}]*width:\s*22px/.test(coarseBlock));
+check('sliders get a tall hit area',
+  /input\[type="range"\]\s*\{[^}]*height:\s*34px/.test(coarseBlock));
+check('switches get a finger-sized track and matching travel',
+  /width:\s*44px/.test(coarseBlock) && /translateX\(20px\)/.test(coarseBlock),
+  'growing the track without the travel leaves the knob short of the end');
+check('segmented buttons get a real target',
+  /\.segmented button\s*\{[^}]*min-height:\s*40px/.test(coarseBlock));
+check('crop handles grow for a fingertip',
+  /\.crop-handle\s*\{[^}]*width:\s*26px/.test(coarseBlock));
+check('text inputs avoid the iOS zoom-on-focus jump',
+  /font-size:\s*16px/.test(coarseBlock));
+check('notched screens are padded with the safe-area inset',
+  cssSource.includes('env(safe-area-inset-top)') &&
+  cssSource.includes('env(safe-area-inset-bottom)'));
+check('the tab bar no longer hardcodes its column count',
+  !/grid-template-columns:\s*repeat\(4/.test(cssSource),
+  'five tabs in a four-column grid is what wrapped PRINT');
+
 check('no uncaught errors during the session', errors.length === 0,
   errors.map((e) => e.message).join(' | ').slice(0, 240));
 

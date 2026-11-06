@@ -47,6 +47,23 @@ Pick one and keep adjusting — nothing is baked in.
 | CYANOTYPE | Prussian-blue print, flat and dreamy |
 | CARBON | Hard structural contrast, cool cast |
 
+### On a phone
+
+The three columns become one, in the order you use them: the **film stock
+strip** across the top, the **photograph** in a fixed slice of the screen, then
+the **controls** scrolling underneath. You pinch to zoom, tap to paint, and the
+panel tabs stay on one row.
+
+Touch changes what the interface has to do. Sliders get a 22px thumb and a
+34px hit area, switches grow to 44×26, crop handles to 26px, and every button
+clears 40px. The tool row scrolls sideways rather than dropping buttons. The
+count and status bars respect the notch and the home indicator. Text inputs sit
+at 16px so iOS does not zoom the page on focus, and the stage claims vertical
+gestures so a downward drag does not reload the page and discard your edit.
+
+In **landscape** the stage drops to 42dvh and the rail header hides, so the
+panel still gets room.
+
 ### Themes
 
 A **light** and **dark** theme, toggle with <kbd>T</kbd> or the icon in the
@@ -211,16 +228,25 @@ npm run build && node tools/test-deploy.mjs
   curve (including a monotonicity sweep), the dodge/burn mask, the ZIP writer,
   and the graphic effects (each one must leave both ink and paper and must
   modulate with the image rather than render a uniform screen)
-- `test-ui.mjs` — 137 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 161 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
   cancel, the aspect lock staying in sync with its control, the effects tab
-  and its menu, loading a graphic stock, light/dark theme, reset, keyboard
+  and its menu, loading a graphic stock, pinch to zoom, painting with a
+  fingertip, the phone layout's CSS contract, light/dark theme, reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 
 `test-engine.mjs` also writes `tools/out/preset-sheet.png` and a full-resolution
 export, so visual regressions are easy to spot.
+
+`test-ui.mjs` runs in jsdom, which has no layout engine: it cannot evaluate a
+media query. The phone *layout* is therefore checked by asserting the
+stylesheet contains the rules it depends on (one-column stacking, the dvh stage
+height, touch targets, safe-area padding, `touch-action`), while the touch
+*behaviour* — pinch to zoom, painting with a fingertip, a pinch not painting —
+is driven through real pointer events. The rendered result still has to be
+confirmed in a browser on a real device.
 
 ---
 

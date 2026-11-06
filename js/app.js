@@ -1295,6 +1295,16 @@ function paintAt(event, strength) {
 
 /* Pan the zoomed view */
 let panStart = null;
+/** Deferred touch dab — see the brush pointerdown handler. */
+let tapTimer = 0;
+let pendingTap = null;
+
+/** Deliver a dab that was waiting to see whether a pinch was starting. */
+function commitPendingTap() {
+  const tap = pendingTap;
+  pendingTap = null;
+  if (tap) paintAt(tap, 1);
+}
 stageFrame.addEventListener('pointerdown', (event) => {
   if (state.brush && engine.loaded) {
     if (event.button !== 0 && event.button !== 2) return;
@@ -1304,8 +1314,21 @@ stageFrame.addEventListener('pointerdown', (event) => {
     strokeStarted = true;
     lastDab = null;
     stageFrame.setPointerCapture(event.pointerId);
-    // A single tap should register even without movement.
-    paintAt(event, 1);
+    // A single tap should register even without movement. With a finger the
+    // dab is deferred briefly: if a second finger lands it is a pinch, and
+    // painting a dot before zooming would be an accidental edit.
+    if (event.pointerType === 'touch') {
+      pendingTap = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId };
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => {
+        tapTimer = 0;
+        // A second finger means this was the start of a pinch.
+        if (livePointers.size > 1) { pendingTap = null; return; }
+        commitPendingTap();
+      }, 60);
+    } else {
+      paintAt(event, 1);
+    }
     return;
   }
 
@@ -1319,12 +1342,19 @@ stageFrame.addEventListener('pointerdown', (event) => {
 stageFrame.addEventListener('pointermove', (event) => {
   lastPointerEvent = event;
   if (state.brush && engine.loaded) {
-    // Holding Alt flips to erase without leaving the stroke.
-    if (event.altKey !== state.erase && !eraseBtn.dataset.locked) {
-      state.erase = event.altKey;
-      updateBrushUi();
+    // Holding Alt flips to erase without leaving the stroke — a keyboard
+    // gesture, so it must not be read from a touch event, where altKey is
+    // always false and would silently cancel an erase the user turned on with
+    // the erase button.
+    if (event.pointerType !== 'touch') {
+      if (event.altKey !== state.erase && !eraseBtn.dataset.locked) {
+        state.erase = event.altKey;
+        updateBrushUi();
+      }
+      // The ring is a cursor: it marks where a hidden pointer is. A fingertip
+      // is its own indicator and would be covered by it.
+      showBrushCursor(event);
     }
-    showBrushCursor(event);
     if (strokeStarted) paintAt(event, 0.55);
     return;
   }
@@ -1337,6 +1367,15 @@ stageFrame.addEventListener('pointermove', (event) => {
 
 function endPan() {
   if (strokeStarted) {
+    // A finger's dab is still pending (see the deferred tap in the brush
+    // pointerdown handler). Letting the timer deliver it after the stroke has
+    // been closed leaves `drafting` armed with nothing to disarm it, and the
+    // stroke never reaches the history.
+    if (tapTimer) {
+      clearTimeout(tapTimer);
+      tapTimer = 0;
+      commitPendingTap();
+    }
     strokeStarted = false;
     lastDab = null;
     state.drafting = false;
@@ -1367,6 +1406,90 @@ stageFrame.addEventListener(
   },
   { passive: false }
 );
+
+/* ------------------------------------------------------------------ */
+/* Pinch to zoom                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Two-finger pinch on the stage.
+ *
+ * On a phone the wheel is unavailable, so without this the only way to look
+ * closely at a print is the +/− buttons — which is no use when what you want
+ * is to put two fingers on the face and pull. Pointer events are used rather
+ * than touch events so the same code covers a trackpad-less tablet.
+ *
+ * The scale is applied continuously to `state.view.zoom` and the view is laid
+ * out on each move; nothing is re-rendered from the negative, so the gesture
+ * stays smooth even on a large photograph.
+ */
+const pinch = { active: false, ids: [], startDist: 0, startZoom: 1 };
+
+function pointerDistance(touches) {
+  const [a, b] = touches;
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+const livePointers = new Map();
+
+stageFrame.addEventListener('pointerdown', (event) => {
+  if (event.pointerType !== 'touch' || !engine.loaded) return;
+  livePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+
+  if (livePointers.size === 2) {
+    // A second finger cancels any pan or brush stroke the first one started:
+    // the gesture has become a pinch, not a drag.
+    panStart = null;
+    strokeStarted = false;
+    const pts = [...livePointers.values()];
+    pinch.active = true;
+    pinch.ids = [...livePointers.keys()];
+    pinch.startDist = pointerDistance(pts) || 1;
+    pinch.startZoom = state.view.zoom === 'fit' ? 1 : state.view.zoom;
+    stageFrame.classList.add('pinching');
+  }
+});
+
+stageFrame.addEventListener('pointermove', (event) => {
+  if (!livePointers.has(event.pointerId)) return;
+  livePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+  if (!pinch.active) return;
+
+  const pts = pinch.ids.map((id) => livePointers.get(id)).filter(Boolean);
+  if (pts.length < 2) return;
+
+  const scale = pointerDistance(pts) / pinch.startDist;
+  const next = Math.min(6, Math.max(1, pinch.startZoom * scale));
+  state.view.zoom = next <= 1.02 ? 'fit' : next;
+  if (state.view.zoom === 'fit') {
+    state.view.panX = 0;
+    state.view.panY = 0;
+  }
+  layoutView();
+});
+
+function endPinch(event) {
+  livePointers.delete(event.pointerId);
+  if (!pinch.active) return;
+  if (livePointers.size < 2) {
+    pinch.active = false;
+    pinch.ids = [];
+    stageFrame.classList.remove('pinching');
+    // Snap to the nearest step so the readout is a real number and the next
+    // +/− press continues from somewhere sensible.
+    if (state.view.zoom !== 'fit') {
+      const z = state.view.zoom;
+      state.view.zoom = ZOOM_STEPS.reduce(
+        (best, step) => (Math.abs(step - z) < Math.abs(best - z) ? step : best),
+        ZOOM_STEPS[0]
+      );
+      layoutView();
+    }
+  }
+}
+
+stageFrame.addEventListener('pointerup', endPinch);
+stageFrame.addEventListener('pointercancel', endPinch);
 
 /* ------------------------------------------------------------------ */
 /* Compare (hold)                                                      */
