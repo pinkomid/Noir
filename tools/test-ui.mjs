@@ -14,7 +14,7 @@ const virtualConsole = new VirtualConsole();
 virtualConsole.on('jsdomError', (e) => errors.push(e));
 virtualConsole.on('error', (...args) => errors.push(new Error(args.join(' '))));
 
-let html = readFileSync('index.html', 'utf8');
+let html = readFileSync('photo.html', 'utf8');
 /** Pristine markup, before the harness strips <script> tags out of it. */
 const htmlSource = html;
 // Inline the module tree so jsdom runs it without a network module loader.
@@ -31,7 +31,7 @@ const modules = {
   'project/profile/validate.js': readFileSync('project/profile/validate.js', 'utf8'),
   'project/profile/compose.js': readFileSync('project/profile/compose.js', 'utf8'),
   'project/profile/panel.js': readFileSync('project/profile/panel.js', 'utf8'),
-  'project/shell.js': readFileSync('project/shell.js', 'utf8'),
+  'project/profile/page.js': readFileSync('project/profile/page.js', 'utf8'),
 };
 
 const dom = new JSDOM(html.replace(/<script[\s\S]*?<\/script>/, ''), {
@@ -1157,74 +1157,121 @@ check('the tab bar no longer hardcodes its column count',
   'five tabs in a four-column grid is what wrapped PRINT');
 
 /* ------------------------------------------------------------------ */
-/* The split workspace and the profile pane                            */
+/* Three pages: a chooser and two workspaces                           */
 /* ------------------------------------------------------------------ */
 
-console.log('\nWorkspace split:');
+console.log('\nThe chooser:');
 
-check('the page has two panes, profile on the left of the photo pane', (() => {
-  const split = document.querySelector('.workspace-split');
-  const panes = [...split.querySelectorAll(':scope > .pane')];
-  return panes.length === 2
-    && panes[0].classList.contains('pane-profile')
-    && panes[1].classList.contains('pane-photo');
-})(), 'the profile editor must come first in source order');
+const photoPage = htmlSource;
+const landing = readFileSync('index.html', 'utf8');
+const profilePage = readFileSync('profile.html', 'utf8');
+/** The profile editor's own validator, for asserting on composed text. */
+const inspectReport = (text) => profileValidator.inspect(text);
 
-check('the photo pane still contains NOIR\'s own layout', (() => {
-  const photo = document.querySelector('#panePhoto');
-  return ['#openBtn', '#stageFrame', '#view', '#panel', '#rail']
-    .every((sel) => photo.querySelector(sel));
-})(), 'every node NOIR binds to must live inside the photo pane');
+check('the landing page offers exactly two ways in',
+  (landing.match(/class="choice"/g) || []).length === 2,
+  `${(landing.match(/class="choice"/g) || []).length} choices`);
 
-check('the page loads NOIR through the shell, not a second script tag',
-  !/<script[^>]+js\/app\.js/.test(htmlSource),
-  'two entry points would run the darkroom twice');
+check('both choices are real links, not buttons',
+  landing.includes('href="profile.html"') && landing.includes('href="photo.html"'),
+  'a link can be middle-clicked into a new tab; a button handler cannot');
 
-check('there is exactly one module script on the page',
-  (htmlSource.match(/<script type="module"/g) || []).length === 1,
-  `${(htmlSource.match(/<script type="module"/g) || []).length} found`);
+check('each choice says what it leads to',
+  /Profile editor/.test(landing) && /Photo editor/.test(landing) &&
+  /3DXChat/.test(landing) && /black &amp; white/.test(landing));
 
-check('the phone pane switcher exists with both panes',
-  document.querySelectorAll('[data-pane-jump]').length === 2,
-  `[${[...document.querySelectorAll('[data-pane-jump]')].map((b) => b.dataset.paneJump).join(', ')}]`);
+check('the landing page loads no app module',
+  !/<script type="module"/.test(landing),
+  'the chooser should not boot the darkroom behind a menu');
 
-check('the shell is loaded from a relative path',
-  htmlSource.includes('src="project/shell.js"') &&
-  !htmlSource.includes('src="/project/shell.js"'),
-  'an absolute path breaks the project-page subpath');
+check('the landing page does not split the screen',
+  !/workspace-split/.test(landing) && !/pane-switch/.test(landing),
+  'the split layout is what this replaces');
 
-/* ---- The profile pane --------------------------------------------- */
+check('the landing page applies the saved theme before first paint',
+  /localStorage\.getItem\('noir\.theme'\)/.test(landing),
+  'reading it after paint means a dark flash then a light page');
 
-console.log('\nProfile pane:');
+console.log('\nThe two workspaces:');
 
-const shellModule = runModule('project/shell.js');
-await shellModule.start();
-await wait(200);
-const workspace = shellModule.getApi();
+check('the photo workspace is NOIR on its own page',
+  ['id="openBtn"', 'id="stageFrame"', 'id="view"', 'id="panel"', 'id="rail"']
+    .every((sel) => photoPage.includes(sel)),
+  'every node the darkroom binds to lives here now');
 
-const profileRoot = document.querySelector('#profilePanel');
-check('the profile pane renders its form', profileRoot.querySelector('#ppName') !== null);
+check('the photo page loads only the darkroom',
+  /<script type="module" src="js\/app.js"><\/script>/.test(photoPage) &&
+  (photoPage.match(/<script type="module"/g) || []).length === 1,
+  'one module, one entry point');
+
+check('the profile page loads only the profile editor',
+  /<script type="module" src="project\/profile\/page\.js"><\/script>/.test(profilePage) &&
+  (profilePage.match(/<script type="module"/g) || []).length === 1);
+
+check('both workspaces can go back to the chooser',
+  /class="back-link"[^>]*href="\.\/"/.test(photoPage) &&
+  /class="back-link"[^>]*href="\.\/"/.test(profilePage),
+  'a workspace with no way out is a trap');
+
+check('the back links are relative, so the Pages subpath works',
+  !/href="\/(?!\/)/.test(photoPage) && !/href="\/(?!\/)/.test(profilePage) &&
+  !/href="\/(?!\/)/.test(landing));
+
+check('all three pages share one theme key',
+  ['index.html', 'photo.html', 'profile.html']
+    .every((f) => /noir\.theme/.test(readFileSync(f, 'utf8'))),
+  'a theme that resets on every navigation is worse than none');
+
+check('no page hardcodes the repository name in a link',
+  !/Noir-Photo-Studio\//.test(landing) && !/Noir-Photo-Studio\//.test(photoPage) &&
+  !/Noir-Photo-Studio\//.test(profilePage),
+  'the repo was renamed to Noir; every link is relative anyway');
+
+check('the profile page has a header and a mount point',
+  /class="page-head"/.test(profilePage) && /id="profilePanel"/.test(profilePage));
+
+/* ---- The profile page's behaviour --------------------------------- */
+
+console.log('\nProfile page:');
+
+const profileValidator = runModule('project/profile/validate.js');
+
+// The harness is booted on photo.html, which has no profile pane. Mount one
+// the way profile.html does, so the panel runs against the same markup it
+// ships with rather than a mock.
+const profileHost = document.createElement('div');
+profileHost.id = 'profilePanel';
+document.body.appendChild(profileHost);
+const profileApi = runModule('project/profile/panel.js').initProfilePanel(profileHost);
+await wait(120);
+
+const profileRoot = profileHost;
+check('the profile page mounts its form', profileRoot.querySelector('#ppName') !== null);
 check('the worked example is prefilled rather than blank',
   profileRoot.querySelector('#ppName').value.length > 0,
   profileRoot.querySelector('#ppName').value);
+check('the page exposes its composed text', typeof profileApi?.text === 'string' && profileApi.text.length > 0);
+check('the composed profile is valid for the game', inspectReport(profileApi.text).ok);
 
-const profileApi = workspace && workspace.profile;
-check('the pane exposes its composed text to the workspace',
-  typeof profileApi?.text === 'string' && profileApi.text.length > 0);
-check('the composed profile is valid for the game',
-  profileApi && workspace.inspect(profileApi.text).ok);
+// profile/page.js keeps the tab title in step. Its own page cannot be booted
+// here (the harness is bound to photo.html), so the rule is asserted directly:
+// a tab that says "Profile editor" while the profile is named something else
+// is a small lie the browser shows all day.
+check('the profile page sets the tab title from the profile name', (() => {
+  const src = readFileSync('project/profile/page.js', 'utf8');
+  return /document\.title\s*=/.test(src) && /panel\.fields\.name/.test(src);
+})(), 'the title rule lives in page.js');
 
 const preview = profileRoot.querySelector('#ppPreview');
 check('the preview shows the composed text',
-  preview.textContent.includes('╭') || preview.textContent.includes('┈'),
+  preview.textContent.includes('┈') || preview.textContent.includes('╭'),
   preview.textContent.slice(0, 40).replace(/\n/g, '⏎'));
 
 const stats = profileRoot.querySelector('#ppStats').textContent;
-check('the character count is shown against the limit',
-  /\/ 1000/.test(stats), stats.replace(/\s+/g, ' ').trim());
+check('the character count is shown against the limit', /\/ 1000/.test(stats),
+  stats.replace(/\s+/g, ' ').trim());
 
 check('the count matches the game\'s counting rule', (() => {
-  // Characters plus line breaks; a CRLF counts twice.
   const text = profileApi.text;
   const expected = text.length + (text.match(/\r\n|\r|\n/g) || []).length;
   return stats.includes(String(expected));
@@ -1233,31 +1280,26 @@ check('the count matches the game\'s counting rule', (() => {
 check('a clean profile offers the copy button',
   profileRoot.querySelector('#ppCopy').disabled === false);
 
-// Type a name and watch the preview follow.
 const nameInput = profileRoot.querySelector('#ppName');
 nameInput.value = 'Workspace';
 nameInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 await wait(60);
-check('typing a name updates the preview', profileApi.text.includes('ᴡᴏʀᴋꜱᴘᴀᴄᴇ'),
-  'small caps renders it');
-check('typing a name updates the photo pane\'s readout',
-  document.querySelector('#filmReadout .film-name').textContent === 'Workspace',
-  document.querySelector('#filmReadout .film-name').textContent);
+check('typing a name updates the preview', profileApi.text.includes('ᴡᴏʀᴋꜱᴘᴀᴄᴇ'));
+check('the title rule listens for the name field',
+  /ppName[\s\S]{0,120}addEventListener\('input'/.test(readFileSync('project/profile/page.js', 'utf8')),
+  'a title computed once goes stale on the first keystroke');
 
-// Break it on purpose: an unsupported tag and a risky glyph.
 const quoteInput = profileRoot.querySelector('#ppQuote');
 quoteInput.value = 'fire 🔥';
 quoteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 await wait(60);
-const checkTexts = () => [...profileRoot.querySelectorAll('#ppChecks li')].map((li) => li.textContent);
 check('an emoji is reported as a glyph the game may not render',
-  checkTexts().some((t) => /box/.test(t)),
-  checkTexts().find((t) => /box/.test(t)) || 'not reported');
+  [...profileRoot.querySelectorAll('#ppChecks li')].some((li) => /box/.test(li.textContent)),
+  'the client shows a replacement box for it');
 
 quoteInput.value = 'clean';
 quoteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 
-// Palette, frame and font controls have to reach the output.
 const paletteSelect = profileRoot.querySelector('#ppPalette');
 paletteSelect.value = 'noir';
 paletteSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -1269,157 +1311,86 @@ const frameSelect = profileRoot.querySelector('#ppFrame');
 frameSelect.value = 'brackets';
 frameSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
 await wait(60);
-check('choosing a frame adds it around the text',
-  profileApi.text.includes('「'), 'the bracketed frame');
+check('choosing a frame adds it around the text', profileApi.text.includes('「'));
 
 const fontSelect = profileRoot.querySelector('#ppFont');
 fontSelect.value = 'circled';
 fontSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
 await wait(60);
-check('choosing a font rewrites the name', /[ⓐ-ⓩⒶ-Ⓩ]/.test(profileApi.text),
-  'the name should come back circled');
+check('choosing a font rewrites the name', /[ⓐ-ⓩⒶ-Ⓩ]/.test(profileApi.text));
 
-// Colour off must remove every colour tag, not just the first block's.
 fontSelect.value = 'smallcaps';
 fontSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
 const colourToggle = profileRoot.querySelector('#ppColour');
 colourToggle.checked = false;
 colourToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
 await wait(60);
-check('turning colour off removes every colour tag',
-  !profileApi.text.includes('<color'),
+check('turning colour off removes every colour tag', !profileApi.text.includes('<color'),
   'a single stray tag defeats the switch');
-
 colourToggle.checked = true;
 colourToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
 
-// Centring off must left-align.
 const centreToggle = profileRoot.querySelector('#ppCentre');
 centreToggle.checked = false;
 centreToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
 await wait(60);
 check('turning centring off left-aligns every line',
   profileApi.text.split('\n').every((line) => !line.startsWith(' ')));
-
 centreToggle.checked = true;
 centreToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
 
-// Templates.
-const templateButton = profileRoot.querySelector('[data-template="minimal"]');
-templateButton.dispatchEvent(new window.Event('click', { bubbles: true }));
+profileRoot.querySelector('[data-template="minimal"]')
+  .dispatchEvent(new window.Event('click', { bubbles: true }));
 await wait(80);
-check('a template replaces the style', workspace.profile.fields.frame === 'rule-long',
-  workspace.profile.fields.frame);
-check('a template is still valid after applying',
-  workspace.inspect(profileApi.text).ok);
+check('a template replaces the style', profileApi.fields.frame === 'rule-long',
+  profileApi.fields.frame);
+check('a template is still valid after applying', inspectReport(profileApi.text).ok);
 
-// The draft persists, so a reload does not lose the work.
 check('the draft is saved to local storage',
   localStorage.getItem('noir.profile.draft.v1') !== null,
   'local only — nothing is uploaded');
 
-// Reset.
 profileRoot.querySelector('#ppReset').dispatchEvent(new window.Event('click', { bubbles: true }));
 await wait(80);
 check('reset restores the worked example',
-  workspace.profile.fields.frame === 'rounded' &&
-  workspace.profile.fields.palette === 'dark-gothic',
-  `${workspace.profile.fields.frame} / ${workspace.profile.fields.palette}`);
+  profileApi.fields.frame === 'rounded' && profileApi.fields.palette === 'dark-gothic',
+  `${profileApi.fields.frame} / ${profileApi.fields.palette}`);
 
-/* ---- Pane switching ----------------------------------------------- */
+/* ---- The stylesheets ---------------------------------------------- */
 
-console.log('\nPane switching:');
-
-check('the photo pane is the default on a phone',
-  document.body.dataset.pane === 'photo', document.body.dataset.pane);
-
-document.querySelector('[data-pane-jump="profile"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('the switcher marks the active pane',
-  document.body.dataset.pane === 'profile' &&
-  document.querySelector('[data-pane-jump="profile"]').getAttribute('aria-selected') === 'true');
-
-document.querySelector('[data-pane-jump="photo"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('switching back restores the photo pane', document.body.dataset.pane === 'photo');
-
-/* ---- Both panes alive at the same time ---------------------------- */
-
-console.log('\nBoth panes together:');
-
-check('the darkroom still works with the profile pane open',
-  app.state.params !== undefined && document.querySelector('#view').width > 0,
-  `canvas ${document.querySelector('#view').width}px`);
-
-check('the sample photo survives the split',
-  document.querySelector('#emptyState').hidden === true);
-
-check('the profile text does not disturb the photo pane\'s own readout',
-  document.querySelector('#panel .tabbar') !== null,
-  'both panes update the same DOM, so their ids must not collide');
-
-check('the two panes share one theme switch', (() => {
-  // NOIR owns the theme button; the profile pane has no second one.
-  return document.querySelectorAll('#themeBtn').length === 1
-    && document.querySelectorAll('.pane-profile [id="themeBtn"]').length === 0;
-})(), 'a second switch would let the panes disagree about the theme');
-
-check('no element id appears twice on the page', (() => {
-  const ids = [...document.querySelectorAll('[id]')].map((el) => el.id);
-  const seen = new Map();
-  const dupes = [];
-  for (const id of ids) {
-    if (seen.has(id)) dupes.push(id);
-    seen.set(id, true);
-  }
-  return dupes.length === 0;
-})(), 'duplicate ids break getElementById in one pane or the other');
-
-check('the photo pane\'s badge reports the loaded photo',
-  /loaded/i.test(document.querySelector('#photoBadge').textContent),
-  document.querySelector('#photoBadge').textContent);
-
-check('the profile pane does not intercept keyboard shortcuts',
-  (() => {
-    const before = app.state.brush;
-    const target = document.querySelector('#ppName');
-    target.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'b', bubbles: true }));
-    return app.state.brush === before;
-  })(), 'typing a name must not toggle the brush');
-
-/* ---- The stylesheet contract -------------------------------------- */
-
-console.log('\nWorkspace stylesheet:');
+console.log('\nPage stylesheets:');
 
 const profileCss = readFileSync('styles/profile.css', 'utf8');
 
-check('the two panes are laid out side by side, photo pane taking the slack',
-  /\.workspace-split\s*\{[^}]*grid-template-columns:\s*clamp\([^)]*\)\s*minmax\(0,\s*1fr\)/.test(profileCss),
-  'the form column needs a floor and the canvas must absorb the rest');
+check('the chooser is a two-card grid',
+  /\.landing-choices\s*\{[^}]*grid-template-columns:\s*1fr 1fr/.test(profileCss));
 
-check('the profile pane comes first, on the left',
-  htmlSource.indexOf('pane-profile') < htmlSource.indexOf('pane-photo'));
+check('the chooser collapses to one column on a phone',
+  /@media\s*\(max-width:\s*700px\)[\s\S]*?\.landing-choices\s*\{[^}]*grid-template-columns:\s*1fr/.test(profileCss));
 
-check('on a phone only the active pane is displayed',
-  /body\[data-pane="profile"\]\s+\.pane-photo\s*\{[^}]*display:\s*none/.test(profileCss) &&
-  /body\[data-pane="photo"\]\s+\.pane-profile\s*\{[^}]*display:\s*none/.test(profileCss));
+check('the split layout is gone',
+  !/workspace-split/.test(profileCss) && !/pane-switch/.test(profileCss),
+  'leftover rules for a layout nobody sees are how CSS rots');
 
-check('the pane switcher is hidden until the panes stack',
-  /\.pane-switch\s*\{[^}]*display:\s*none/.test(profileCss),
-  'desktop shows both panes, so a switcher there would be a lie');
+check('NOIR keeps its own viewport-based layout',
+  !/--rail-w:\s*176px/.test(profileCss),
+  'the trimmed rail was a workaround for living inside a pane');
 
-check('NOIR\'s grid is told to fill the pane, not the viewport',
-  /\.pane-photo\s+\.workspace\s*\{[^}]*height:\s*100%/.test(profileCss));
+check('the profile page fills the viewport without scrolling the page',
+  /body\.profile-page\s*\{[^}]*height:\s*100dvh/.test(profileCss));
 
-check('the pane carries its own narrower rail and panel',
-  /--rail-w:\s*176px/.test(profileCss) && /--panel-w:\s*300px/.test(profileCss));
+check('the back link clears the notch',
+  /\.back-link\s*\{[^}]*env\(safe-area-inset-top/.test(profileCss));
 
 check('profile fields avoid the iOS zoom-on-focus jump',
   /font-size:\s*16px/.test(profileCss));
 
 check('touch targets grow on a phone',
-  /@media\s*\(max-width:\s*860px\)[\s\S]*?\.pp-btn\s*\{[^}]*min-height:\s*44px/.test(profileCss));
+  /@media\s*\(max-width:\s*900px\)[\s\S]*?\.pp-btn\s*\{[^}]*min-height:\s*44px/.test(profileCss));
 
-check('the profile stylesheet is loaded by the page',
-  htmlSource.includes('href="styles/profile.css"'));
+check('the profile stylesheet is loaded by all three pages',
+  ['index.html', 'photo.html', 'profile.html']
+    .every((f) => readFileSync(f, 'utf8').includes('styles/profile.css')));
 
 check('the profile pane shares the theme tokens, not its own palette',
   !/#[0-9a-f]{6}/i.test(profileCss.replace(/\/\*[\s\S]*?\*\//g, '').split('.pp-rule')[0]),

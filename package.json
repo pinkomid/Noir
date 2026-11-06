@@ -11,7 +11,7 @@
     "test:engine": "node tools/test-engine.mjs",
     "test:ui": "node tools/test-ui.mjs",
     "test:profile": "node tools/test-profile.mjs",
-    "build": "rm -rf _site && mkdir -p _site && cp index.html _site/ && cp -r styles js assets project _site/ && touch _site/.nojekyll"
+    "build": "rm -rf _site && mkdir -p _site && cp index.html photo.html profile.html _site/ && cp -r styles js assets project _site/ && touch _site/.nojekyll"
   },
   "keywords": [
     "photography",
@@ -23,7 +23,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pinkomid/Noir-Photo-Studio.git"
+    "url": "https://github.com/pinkomid/Noir.git"
   },
-  "homepage": "https://pinkomid.github.io/Noir-Photo-Studio/"
+  "homepage": "https://pinkomid.github.io/Noir/"
 }

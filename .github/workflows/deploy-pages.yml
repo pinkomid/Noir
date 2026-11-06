@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           mkdir -p _site
           # Only the app ships; tests, tooling and config stay out of the build.
-          cp index.html _site/
+          cp index.html photo.html profile.html _site/
           cp -r styles _site/
           cp -r js _site/
           cp -r project _site/
@@ -45,11 +45,13 @@ jobs:
             exit 1
           fi
           test -f _site/index.html
+          test -f _site/photo.html
+          test -f _site/profile.html
           test -f _site/js/app.js
           test -f _site/styles/main.css
           test -f _site/styles/profile.css
-          test -f _site/project/shell.js
           test -f _site/project/profile/panel.js
+          test -f _site/project/profile/page.js
           echo "Site assembled: $(find _site -type f | wc -l) files"
 
       - uses: actions/upload-pages-artifact@v3

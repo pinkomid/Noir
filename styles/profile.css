@@ -1,71 +1,66 @@
 /* ============================================================
-   NOIR Studio — split workspace and the profile editor pane
+   NOIR Studio — shared page chrome and the profile editor
    ------------------------------------------------------------
-   Two panes side by side: the profile editor on the left, the photo
-   darkroom on the right. The photo pane is NOIR unchanged; it only knows
-   it is narrower, because its layout keys off the viewport, and the
-   viewport is the whole screen.
+   index.html is a chooser; profile.html and photo.html are the two
+   workspaces. The rules here cover the chrome they share (back link, page
+   header, theme) and the whole profile editor.
 
-   Colours come from main.css's semantic tokens, so the light/dark theme
-   switch affects both panes rather than leaving one permanently dark.
+   Colours come from main.css's semantic tokens, so the light/dark switch
+   reaches every page rather than leaving one of them permanently dark.
    ============================================================ */
 
-/* ---- The split ---------------------------------------------------- */
+/* ---- Back to the chooser ------------------------------------------ */
 
-.workspace-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-  background: var(--bg-app);
+.back-link {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-decoration: none;
+  background: var(--bg-overlay-chip);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  backdrop-filter: blur(6px);
 }
 
-.workspace-split {
-  display: grid;
-  /* The profile pane is a form; the photo pane is a canvas. The canvas wins
-     the width, but the form gets a floor it can still be typed in. */
-  grid-template-columns: clamp(360px, 40%, 600px) minmax(0, 1fr);
-  gap: 0;
-  flex: 1;
-  min-height: 0;
-  position: relative;
+.back-link:hover,
+.back-link:focus-visible {
+  color: var(--text);
+  border-color: var(--line-hover);
 }
 
-/* A seam between the panes, drawn as a border on the left one so the two
-   never double up. */
-.pane-profile {
-  border-right: 1px solid var(--line-strong);
+.back-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg-app);
-}
+/* ---- Page header --------------------------------------------------- */
 
-.pane-head {
+.page-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 56px;
-  padding: 0 18px;
+  min-height: 60px;
+  padding: 0 18px 0 150px;
   padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--line);
   background: var(--bg-bar);
   flex: none;
 }
 
-.pane-title { min-width: 0; }
+.page-title { min-width: 0; }
 
-.pane-title h1,
-.pane-title h2 {
+.page-title h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 400;
   letter-spacing: 0.06em;
   color: var(--text);
@@ -74,7 +69,7 @@
   text-overflow: ellipsis;
 }
 
-.pane-title p {
+.page-title p {
   margin: 1px 0 0;
   font-size: 11px;
   color: var(--text-mute);
@@ -83,7 +78,7 @@
   text-overflow: ellipsis;
 }
 
-.pane-badge {
+.page-badge {
   margin-left: auto;
   flex: none;
   font-size: 10px;
@@ -96,29 +91,23 @@
   white-space: nowrap;
 }
 
-.pane-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-/* The photo pane hands its height to NOIR's own grid, which expects to fill
-   the viewport. Only the grid stretches: the top bar, the status bar and the
-   modal layer keep their own sizes. */
-.pane-body-photo {
-  overflow: hidden;
+/* The profile page is the page: header on top, editor filling the rest. */
+body.profile-page {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
-.pane-body-photo > .topbar,
-.pane-body-photo > .statusbar {
-  flex: none;
-}
-
-.pane-body-photo > .workspace {
+.profile-main {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---- Profile editor layout ---------------------------------------- */
@@ -489,104 +478,26 @@
   text-align: center;
 }
 
-/* ---- Pane switcher: phone only ------------------------------------ */
+/* ---- Responsive ---------------------------------------------------
+   No pane switcher and no split to keep in sync any more: the profile page
+   is one page, and photo.html is NOIR on its own, where its own media
+   queries finally measure the real viewport.
+   -------------------------------------------------------------------- */
 
-.pane-switch {
-  display: none;
-  flex: none;
-  gap: 6px;
-  padding: 8px 10px;
-  padding-top: calc(8px + env(safe-area-inset-top, 0px));
-  background: var(--bg-bar);
-  border-bottom: 1px solid var(--line-strong);
-}
+@media (max-width: 900px) {
+  .page-head { padding-left: 18px; min-height: 52px; flex-wrap: wrap; column-gap: 10px; }
+  .page-title h1 { font-size: 15px; }
+  .page-title p { display: none; }
+  .page-badge { font-size: 9px; padding: 2px 8px; }
 
-.pane-switch button {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 40px;
-  font: inherit;
-  font-size: 12px;
-  letter-spacing: 0.03em;
-  color: var(--text-mute);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  cursor: pointer;
-}
+  /* The back link is fixed over the header, so leave it room rather than
+     letting it sit on top of the title. */
+  body.profile-page .page-head { padding-left: 140px; }
 
-.pane-switch button[aria-selected="true"] {
-  color: var(--text);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
+  .profile-main { overflow-y: auto; }
 
-/* ---- NOIR inside a pane -------------------------------------------
-   NOIR's phone rules live behind a viewport width query, and the viewport
-   here is the whole screen, so at half width it keeps its three desktop
-   columns in a space that cannot hold them. These rules give the photo
-   pane the narrow layout based on its own width instead.
-   ------------------------------------------------------------------ */
-
-.pane-photo .topbar {
-  border-radius: 0;
-}
-
-/* NOIR's three columns need about 940px: a 232px rail of film stocks, the
-   print, and a 348px panel of controls. The pane is narrower than that on any
-   ordinary screen, so the rail and panel are trimmed here rather than letting
-   the print be squeezed to nothing. Custom properties inherit, and .workspace
-   is a descendant of the pane, so setting them on the pane reaches the grid. */
-.pane-photo { --rail-w: 176px; --panel-w: 300px; }
-
-/* NOIR sizes its grid from the viewport because it used to *be* the page.
-   Inside a pane that number is wrong, so it fills its container instead. */
-.pane-photo .workspace {
-  height: 100%;
-  min-height: 0;
-}
-
-/* Narrow panes drop the rail's histogram and detail lines, which are the
-   first things that stop being legible. */
-.pane-photo .histogram-wrap { display: none; }
-.pane-photo .film-detail { display: none; }
-
-/* ---- Responsive --------------------------------------------------- */
-
-/* When the two columns wrap, the seam has to move with them. */
-@media (max-width: 1180px) {
-  .workspace-split { grid-template-columns: clamp(340px, 42%, 520px) minmax(0, 1fr); }
-}
-
-/* Phone: one pane at a time, chosen by the switcher. */
-@media (max-width: 860px) {
-  .pane-switch { display: flex; }
-
-  .workspace-split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .pane-profile {
-    border-right: none;
-  }
-
-  /* Only the active pane is in the layout, so the hidden one does not
-     reserve space or steal scroll. */
-  body[data-pane="profile"] .pane-photo { display: none; }
-  body[data-pane="photo"] .pane-profile { display: none; }
-
-  .pane-head { min-height: 48px; padding: 0 14px; }
-  .pane-title h1,
-  .pane-title h2 { font-size: 15px; }
-  .pane-title p { display: none; }
-
-  #profilePanel { height: 100%; overflow-y: auto; }
-
-  /* On a phone the preview is what you are checking, so it sits above the
-     form instead of being buried under it. */
+  /* On a phone the preview is what you are checking, so it comes first
+     instead of being buried under the form. */
   .pp-form, .pp-result { flex: 1 1 100%; }
   .pp-form { border-right: none; padding-bottom: 60px; }
 
@@ -605,10 +516,194 @@
   .pp-check input { width: 20px; height: 20px; }
   .pp-field select,
   .pp-field input[type="text"] { min-height: 44px; }
+  .pp-form textarea { min-height: 70px; }
 }
 
 @media (max-width: 480px) {
   .pp-row { grid-template-columns: minmax(0, 1fr); }
-  .pane-switch button span { font-size: 11px; }
   .pp-form, .pp-result { padding: 12px 12px 32px; }
+  body.profile-page .page-head { padding-left: 132px; }
+  .back-link { padding: 6px 10px; font-size: 11px; }
+}
+
+/* ============================================================
+   The chooser (index.html)
+   ------------------------------------------------------------
+   Two ways in, and nothing else competing for attention. The cards are real
+   links, so the visitor can open either workspace in a new tab.
+   ============================================================ */
+
+body.landing {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px calc(40px + env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(900px 460px at 50% -10%, rgba(217, 165, 95, 0.10), transparent 70%),
+    var(--bg-app);
+}
+
+.landing-main {
+  width: 100%;
+  max-width: 780px;
+}
+
+.landing-head {
+  text-align: center;
+  margin-bottom: 34px;
+}
+
+.landing-mark {
+  display: inline-flex;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.landing-head h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--text);
+}
+
+.landing-head h1 span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.52em;
+  text-indent: 0.52em;
+  color: var(--text-mute);
+  margin-top: 6px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.landing-kicker {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---- The two choices --------------------------------------------- */
+
+.landing-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 22px 20px;
+  min-height: 210px;
+  text-decoration: none;
+  color: var(--text);
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg-panel));
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.choice:hover,
+.choice:focus-visible {
+  border-color: var(--accent-line);
+  background: linear-gradient(180deg, var(--bg-hover), var(--bg-panel));
+  transform: translateY(-2px);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.choice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.choice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.choice-name {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+  letter-spacing: 0.03em;
+}
+
+.choice-desc {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.choice-meta {
+  margin-top: auto;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.choice-go {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-size: 15px;
+  color: var(--text-faint);
+  transition: color 0.16s ease, transform 0.16s ease;
+}
+
+.choice:hover .choice-go,
+.choice:focus-visible .choice-go {
+  color: var(--accent);
+  transform: translateX(3px);
+}
+
+/* ---- Foot --------------------------------------------------------- */
+
+.landing-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 30px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.landing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+@media (max-width: 700px) {
+  .landing-choices { grid-template-columns: 1fr; gap: 12px; }
+  .choice { min-height: 0; padding: 18px; }
+  .landing-head h1 { font-size: 27px; }
+  body.landing { padding: 32px 16px calc(32px + env(safe-area-inset-bottom, 0px)); }
+  .landing-head { margin-bottom: 26px; }
 }
