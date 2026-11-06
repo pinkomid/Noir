@@ -314,12 +314,12 @@ npm run build && node tools/test-deploy.mjs
   curve (including a monotonicity sweep), the dodge/burn mask, the ZIP writer,
   and the graphic effects (each one must leave both ink and paper and must
   modulate with the image rather than render a uniform screen)
-- `test-profile.mjs` — 72 checks: font maps, palette and frame integrity, line
+- `test-profile.mjs` — 82 checks: font maps, palette and frame integrity, line
   centring on visible text, wrapping, trait words, tag balance and nesting,
   colour values, the counting rule, the 1000 boundary, and glyph safety for both
   supplementary-plane characters and BMP glyphs the client font lacks. Every
   font, palette, frame and template must compose to something valid.
-- `test-ui.mjs` — 206 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 211 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
   cancel, the aspect lock staying in sync with its control, the effects tab
@@ -339,6 +339,11 @@ export, so visual regressions are easy to spot.
 `node tools/render-profile.mjs` writes `tools/out/profile-templates.png` — a
 headless render of the four profile templates drawn with `@napi-rs/canvas`. It
 proves the composed text and the colours; it is not a screenshot of the app.
+
+`node tools/render-sliders.mjs` does the same for the profile sliders: it reads
+`--track` out of the stylesheet and paints the control with it, so a colour
+token that resolves to nothing shows up as a missing track rather than having
+to be spotted by eye.
 
 `test-ui.mjs` runs in jsdom, which has no layout engine: it cannot evaluate a
 media query. The phone *layout* is therefore checked by asserting the
