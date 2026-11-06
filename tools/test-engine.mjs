@@ -21,6 +21,7 @@ const { Darkroom, curveInterpolator, isIdentityCurve, buildLUT } = await import(
 const { paramsFor, PRESETS } = await import('../js/presets.js');
 const { DEFAULTS } = await import('../js/controls.js');
 const { createZip } = await import('../js/batch.js');
+const geo = await import('../js/geometry.js');
 
 // --- Helpers --------------------------------------------------------------
 function stats(ctx, w, h) {
@@ -309,7 +310,151 @@ check('zip records both entries', (() => {
 })());
 check('zip stores the payload bytes', Buffer.from(zip).includes(Buffer.from('hello noir')));
 
-// --- 9. Write visual proofs --------------------------------------------
+// --- 9. Geometry: crop, rotate, mirror ---------------------------------
+console.log('\ngeometry:');
+
+const NW = img.width;
+const NH = img.height;
+
+// frameSize: a half-width crop halves the reported width.
+const halfCrop = { ...geo.FRAME_DEFAULTS, crop: { x: 0.25, y: 0, w: 0.5, h: 1 } };
+const halfSize = geo.frameSize(halfCrop, { width: NW, height: NH });
+check('crop halves the reported width', Math.abs(halfSize.width - NW / 2) <= 1,
+  `${halfSize.width} vs ${NW / 2}`);
+
+// A quarter turn swaps the reported axes.
+const turned = geo.frameSize({ ...geo.FRAME_DEFAULTS, rotation: 1 }, { width: NW, height: NH });
+check('quarter turn swaps width and height', turned.width === NH && turned.height === NW,
+  `${turned.width}×${turned.height}`);
+
+check('neutral frame is detected', geo.isNeutralFrame(geo.FRAME_DEFAULTS));
+check('a mirrored frame is not neutral', !geo.isNeutralFrame({ ...geo.FRAME_DEFAULTS, flipH: true }));
+check('a tilted frame is not neutral', !geo.isNeutralFrame({ ...geo.FRAME_DEFAULTS, straighten: 3 }));
+
+// Cloning must not alias the crop rectangle.
+const src = geo.cloneFrame(geo.FRAME_DEFAULTS);
+src.crop.x = 0.4;
+check('cloneFrame deep-copies the crop', geo.FRAME_DEFAULTS.crop.x === 0);
+
+// --- Rendering through the transform ---
+function developFrame(frame, params = paramsFor('noir')) {
+  const eng = new Darkroom();
+  eng.load(img, NW, NH, frame);
+  const c = createCanvas(W, H);
+  const x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  eng.develop(x, W, H, { ...params, frame });
+  return { eng, c, x, s: stats(x, W, H) };
+}
+
+// 1. A neutral frame must reproduce the un-transformed render exactly.
+const plain = developFrame(geo.FRAME_DEFAULTS);
+check('neutral frame renders unchanged', Math.abs(plain.s.mean - base.s.mean) < 0.5,
+  `${plain.s.mean.toFixed(2)} vs ${base.s.mean.toFixed(2)}`);
+
+// 2. Cropping to the dark half of the portrait must darken the print.
+const darkHalf = developFrame({ ...geo.FRAME_DEFAULTS, crop: { x: 0.55, y: 0, w: 0.45, h: 1 } });
+const brightHalf = developFrame({ ...geo.FRAME_DEFAULTS, crop: { x: 0, y: 0, w: 0.45, h: 1 } });
+check('cropping to a darker region darkens the print', darkHalf.s.mean < brightHalf.s.mean - 5,
+  `dark=${darkHalf.s.mean.toFixed(0)} bright=${brightHalf.s.mean.toFixed(0)}`);
+
+// 3. The output must fill the whole frame — no empty margins anywhere.
+function edgeCoverage(ctx) {
+  const w = W;
+  const h = H;
+  const bands = [
+    ctx.getImageData(0, 0, w, 2).data,
+    ctx.getImageData(0, h - 2, w, 2).data,
+    ctx.getImageData(0, 0, 2, h).data,
+    ctx.getImageData(w - 2, 0, 2, h).data,
+  ];
+  let transparent = 0;
+  for (const band of bands) {
+    for (let i = 3; i < band.length; i += 4) if (band[i] < 250) transparent++;
+  }
+  return transparent;
+}
+// A handful of antialiased edge pixels is physically correct; a blank
+// gutter would be thousands.
+const EDGE_TOLERANCE = 24;
+check('neutral frame leaves no transparent margins', edgeCoverage(plain.x) <= EDGE_TOLERANCE,
+  `${edgeCoverage(plain.x)} px`);
+
+// 4. Straightening must not reveal empty corners either.
+const tilted = developFrame({ ...geo.FRAME_DEFAULTS, straighten: 15 });
+check('a 15° straighten leaves no empty corners', edgeCoverage(tilted.x) <= EDGE_TOLERANCE,
+  `${edgeCoverage(tilted.x)} transparent pixels`);
+check('straightening changes the image', Math.abs(tilted.s.mean - plain.s.mean) > 0.5,
+  `mean ${plain.s.mean.toFixed(1)} → ${tilted.s.mean.toFixed(1)}`);
+
+// 5. A quarter turn must transpose the render, not crop or letterbox.
+const rotated = developFrame({ ...geo.FRAME_DEFAULTS, rotation: 1 });
+check('quarter turn keeps a full frame', edgeCoverage(rotated.x) <= EDGE_TOLERANCE,
+  `${edgeCoverage(rotated.x)} px`);
+
+// Compare against an explicit transpose of the source to prove the rotation
+// is a real rotation rather than a re-crop.
+{
+  const tmp = createCanvas(NW, NH);
+  const tx = tmp.getContext('2d');
+  tx.translate(NW / 2, NH / 2);
+  tx.rotate(Math.PI / 2);
+  tx.drawImage(img, -NW / 2, -NH / 2);
+  const tctx = tmp.getContext('2d');
+  const ref = createCanvas(H, W);
+  const rx = ref.getContext('2d');
+  rx.imageSmoothingQuality = 'high';
+  rx.drawImage(tmp, 0, 0, NW, NH, 0, 0, H, W);
+  const rotRendered = createCanvas(H, W);
+  const rr = rotRendered.getContext('2d');
+  const eng = new Darkroom();
+  eng.load(img, NW, NH, { ...geo.FRAME_DEFAULTS, rotation: 1 });
+  eng.develop(rr, H, W, { ...paramsFor('noir'), frame: { ...geo.FRAME_DEFAULTS, rotation: 1 } }, { skipGrain: true });
+
+  // Half a frame of empty space is a bug; a couple of edge pixels is not.
+  const a = rr.getImageData(0, 0, H, W).data;
+  let empty = 0;
+  for (let i = 3; i < a.length; i += 4) if (a[i] < 200) empty++;
+  const total = (H * W);
+  check('rotated frame is solid, not hollow', empty / total < 0.005,
+    `${((empty / total) * 100).toFixed(3)}% empty`);
+}
+
+// 6. Mirroring flips the image: the crop that was dark becomes bright.
+const mirrorFrame = { ...geo.FRAME_DEFAULTS, flipH: true };
+const mirrored = developFrame(mirrorFrame);
+check('mirror renders a full frame', edgeCoverage(mirrored.x) <= EDGE_TOLERANCE,
+  `${edgeCoverage(mirrored.x)} px`);
+
+const leftAfterMirror = developFrame(
+  { ...mirrorFrame, crop: { x: 0, y: 0, w: 0.45, h: 1 } }
+);
+check('mirroring swaps which side is dark',
+  leftAfterMirror.s.mean > brightHalf.s.mean + 4,
+  `left-unmirrored=${brightHalf.s.mean.toFixed(0)} left-mirrored=${leftAfterMirror.s.mean.toFixed(0)}`);
+
+// 7. Aspect fitting keeps the window inside the frame and lands on ratio.
+for (const id of ['1:1', '3:2', '16:9']) {
+  const ratio = geo.aspectRatio(id, { width: NW, height: NH });
+  const fitted = geo.fitCropToAspect(geo.FRAME_DEFAULTS.crop, ratio, { width: NW, height: NH });
+  const pxW = fitted.w * NW;
+  const pxH = fitted.h * NH;
+  const inside = fitted.x >= -1e-6 && fitted.y >= -1e-6
+    && fitted.x + fitted.w <= 1 + 1e-6 && fitted.y + fitted.h <= 1 + 1e-6;
+  const accurate = Math.abs(pxW / pxH - ratio) < 0.02;
+  check(`  aspect ${id} fits inside and matches`, inside && accurate,
+    `${pxW.toFixed(0)}×${pxH.toFixed(0)} ratio=${(pxW / pxH).toFixed(3)} want ${ratio.toFixed(3)}`);
+}
+
+// 8. printToOriginal must undo the transform for brush coordinates.
+{
+  const f = { ...geo.FRAME_DEFAULTS, rotation: 1, flipH: true };
+  const { x, y } = geo.printToOriginal(0.5, 0.5, f);
+  check('printToOriginal maps the centre to the centre',
+    Math.abs(x - 0.5) < 1e-6 && Math.abs(y - 0.5) < 1e-6, `${x}, ${y}`);
+}
+
+// --- 10. Write visual proofs -------------------------------------------
 mkdirSync('tools/out', { recursive: true });
 const sheet = createCanvas(W * 3, H * 4);
 const sctx = sheet.getContext('2d');

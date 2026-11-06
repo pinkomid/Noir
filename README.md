@@ -47,6 +47,20 @@ Pick one and keep adjusting — nothing is baked in.
 | CYANOTYPE | Prussian-blue print, flat and dreamy |
 | CARBON | Hard structural contrast, cool cast |
 
+### Crop & transform
+
+- **Crop** — drag the frame or any of its eight handles, with rule-of-thirds
+  guides. <kbd>Enter</kbd> applies, <kbd>Esc</kbd> cancels.
+- **Aspect lock** — Free, Original, 1:1, 4:5, 5:4, 3:2, 2:3, 16:9, Scope. The
+  lock fits the largest window of that ratio inside the negative.
+- **Straighten** — ±45° with an automatic safe crop, so tilting never exposes
+  empty corners.
+- **Rotate** — 90° steps either way (<kbd>Shift [</kbd> / <kbd>Shift ]</kbd>),
+  and **mirror** horizontally (<kbd>M</kbd>) or vertically.
+
+Geometry is applied before any development, so grain, toning and the dodge/burn
+mask all follow the print — and the exported file is the crop, not the negative.
+
 ### Adjustments
 
 - **Tone** — exposure (EV), contrast, highlights, shadows, whites, blacks
@@ -78,6 +92,7 @@ either as individual downloads or as a single ZIP — written by hand in
 - <kbd>⌘/Ctrl</kbd> + scroll or <kbd>+</kbd> / <kbd>−</kbd> to zoom; drag to pan
 - <kbd>⌘/Ctrl Z</kbd> / <kbd>⇧⌘Z</kbd> for undo and redo
 - <kbd>1</kbd>–<kbd>9</kbd> jump between stocks, <kbd>←</kbd> <kbd>→</kbd> step through all twelve
+- <kbd>C</kbd> opens the crop frame, <kbd>M</kbd> mirrors, <kbd>Shift [</kbd> / <kbd>Shift ]</kbd> rotate 90°
 - <kbd>B</kbd> toggles the brush, <kbd>[</kbd> / <kbd>]</kbd> change its size, <kbd>Alt</kbd> erases
 - <kbd>Shift B</kbd> opens batch develop
 - <kbd>?</kbd> shows the full shortcut sheet
@@ -92,7 +107,7 @@ resolution. Metadata is not carried over.
 The pipeline mirrors a real darkroom's order of operations:
 
 ```
-negative ──► clarity (unsharp) ──► halation (bloom) ──► single tonal pass ──► print
+negative ──► geometry ──► clarity (unsharp) ──► halation (bloom) ──► tonal pass ──► print
                                                          ├ channel mix
                                                          ├ exposure
                                                          ├ tone curve (256-entry LUT,
@@ -149,10 +164,11 @@ npm test                        # engine + UI suites
 npm run build && node tools/test-deploy.mjs
 ```
 
-- `test-engine.mjs` — 45 checks: tonal math, grain, toning, export, the monotone
+- `test-engine.mjs` — 66 checks: tonal math, grain, toning, export, the monotone
   curve (including a monotonicity sweep), the dodge/burn mask, and the ZIP writer
-- `test-ui.mjs` — 36 checks: boot, loading, sliders, undo/redo, compare, zoom,
-  export download, reset, keyboard
+- `test-ui.mjs` — 83 checks: boot, loading, sliders, undo/redo, compare, zoom,
+  crop handles, rotation, mirror, straighten, aspect lock, export download,
+  reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 

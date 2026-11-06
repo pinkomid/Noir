@@ -7,6 +7,10 @@
 
 import { Darkroom, SUPPORTS_FILTER } from './engine.js';
 import { BatchJob } from './batch.js';
+import {
+  FRAME_DEFAULTS, ASPECTS, aspectRatio, frameSize,
+  fitCropToAspect, isNeutralFrame, cloneFrame,
+} from './geometry.js';
 import { PRESETS, PRESET_BY_ID, paramsFor } from './presets.js';
 import { DEFAULTS as CONTROL_DEFAULTS, CURVE_POINTS, ALL_CONTROLS } from './controls.js';
 import {
@@ -40,6 +44,8 @@ const state = {
   drafting: false,
   brush: false,
   erase: false,
+  cropMode: false,
+  aspect: 'free',
 };
 
 const history = { stack: [], index: -1 };
@@ -75,6 +81,22 @@ let draftTimer = 0;
 
 let panel = buildPanel(panelBody, {
   onChange: (id, value, { commit }) => {
+    // Two controls in the transform group describe the frame rather than a
+    // pixel parameter, so they are routed before the generic path.
+    if (id === 'straighten') {
+      state.params.straighten = Number(value);
+      state.params.frame.straighten = Number(value);
+      applyFrame(state.params.frame, { syncPanel: false });
+      updateFrameReadout();
+      if (commit) pushHistory();
+      return;
+    }
+    if (id === 'aspect') {
+      applyAspect(value);
+      if (commit) pushHistory();
+      return;
+    }
+
     state.params[id] = value;
 
     // Toggles and the curve commit on click, so they never need a draft.
@@ -93,8 +115,14 @@ let panel = buildPanel(panelBody, {
     if (commit) pushHistory();
   },
   onReset: (id) => {
+    if (id === 'straighten' || id === 'aspect') {
+      if (id === 'aspect') { state.aspect = 'orig'; applyAspect('orig'); }
+      else setParam(id, CONTROL_DEFAULTS[id], true);
+      return;
+    }
     setParam(id, CONTROL_DEFAULTS[id], true);
   },
+  onAction: (id) => handleAction(id),
 });
 
 const rail = buildPresetRail($('#presetList'), PRESETS, SAMPLE_THUMB, (id) => applyPreset(id, true));
@@ -112,9 +140,15 @@ function setParam(id, value, commit = false) {
   if (commit) pushHistory();
 }
 
+function withFrame(params, frame) {
+  return { ...params, frame: frame ? cloneFrame(frame) : cloneFrame(FRAME_DEFAULTS) };
+}
+
 function setPresetSilently(id) {
+  const previousFrame = state.params && state.params.frame;
   state.presetId = id;
-  state.params = paramsFor(id);
+  // Switching film stock must not disturb the crop or orientation.
+  state.params = withFrame(paramsFor(id), previousFrame);
   rail.setActive(id);
   panel.sync(state.params);
   updateReadout();
@@ -142,14 +176,113 @@ function applyPreset(id, commit = false) {
 
 function resetAll() {
   setPresetSilently(PRESETS[0].id);
-  state.params = paramsFor(PRESETS[0].id);
-  engine.ensureMask();
+  state.params = withFrame(paramsFor(PRESETS[0].id), FRAME_DEFAULTS);
+  state.aspect = 'free';
+  if (state.cropMode) toggleCropMode(false);
+  engine.refreshSurface(state.params.frame);
+  updateFrameReadout();
   state.brush = false;
   panel.sync(state.params);
   updateBrushUi();
   scheduleRender({ histogram: true });
   pushHistory();
   toast('Adjustments reset');
+}
+
+/* ------------------------------------------------------------------ */
+/* Geometry: crop, rotate, mirror                                      */
+/* ------------------------------------------------------------------ */
+
+/** Push a new frame into state, re-derive the surface, and repaint. */
+function applyFrame(frame, { resetMask = false, histogram = true, syncPanel = true } = {}) {
+  state.params.frame = cloneFrame(frame);
+  // Mirror the frame's straighten angle into the flat parameter map, which
+  // is what the panel reads and what the export path copies.
+  state.params.straighten = state.params.frame.straighten;
+  engine.refreshSurface(state.params.frame, resetMask);
+  if (syncPanel) panel.sync(state.params);
+  needHistogram = histogram;
+  scheduleRender({ histogram });
+}
+
+function commitFrame(frame, opts) {
+  applyFrame(frame, opts);
+  pushHistory();
+}
+
+function handleAction(id) {
+  switch (id) {
+    case 'cropMode':
+      toggleCropMode();
+      break;
+    case 'rotateLeft':
+      rotateQuarter(-1);
+      break;
+    case 'rotateRight':
+      rotateQuarter(1);
+      break;
+    default:
+      break;
+  }
+}
+
+function rotateQuarter(direction) {
+  if (!engine.loaded) return;
+  const frame = state.params.frame;
+  frame.rotation = ((frame.rotation + direction) % 4 + 4) % 4;
+  // A quarter turn swaps the print's axes, so an aspect lock may no longer hold.
+  if (state.aspect !== 'free') applyAspect(state.aspect, { silent: true });
+  commitFrame(frame, { resetMask: true });
+  updateFrameReadout();
+}
+
+function toggleMirror(axis) {
+  if (!engine.loaded) return;
+  const frame = state.params.frame;
+  frame[axis] = !frame[axis];
+  commitFrame(frame, { resetMask: true });
+  updateFrameReadout();
+}
+
+function applyAspect(aspectId, { silent = false } = {}) {
+  if (!engine.loaded) return;
+  state.aspect = aspectId;
+
+  const ratio = aspectRatio(aspectId, engine.negative);
+  const frame = state.params.frame;
+  if (ratio) {
+    // Fit against the whole negative, keeping the current centre. Fitting
+    // against an already-cropped window compounds the reduction.
+    frame.crop = fitCropToAspect({ x: 0, y: 0, w: 1, h: 1 }, ratio, engine.negative);
+  }
+  applyFrame(frame);
+  updateFrameReadout();
+  if (!silent && ratio) toast(`Aspect ${aspectId === 'orig' ? 'original' : aspectId}`, { timeout: 1400 });
+}
+
+function resetFrame() {
+  if (!engine.loaded) return;
+  state.aspect = 'free';
+  commitFrame(FRAME_DEFAULTS, { resetMask: true });
+  updateFrameReadout();
+}
+
+function updateFrameReadout() {
+  if (!engine.loaded) return;
+  const size = frameSize(state.params.frame, engine.negative);
+  dimsEl.textContent = `${size.width} × ${size.height}`;
+  const mods = [];
+  const f = state.params.frame;
+  if (!isNeutralFrame(f)) {
+    if (f.crop.w < 0.999 || f.crop.h < 0.999) mods.push('cropped');
+    if (f.rotation % 4) mods.push(`${f.rotation * 90}°`);
+    if (f.flipH) mods.push('mirror H');
+    if (f.flipV) mods.push('mirror V');
+    if (Math.abs(f.straighten) > 0.05) mods.push(`${f.straighten.toFixed(1)}° tilt`);
+  }
+  stageBadge.textContent = mods.length
+    ? `${PRESET_BY_ID[state.presetId].name} · ${mods.join(' · ')}`
+    : PRESET_BY_ID[state.presetId].name + (isModified() ? ' · adjusted' : '');
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,11 +293,12 @@ function cloneParams(params) {
   return {
     ...params,
     curvePoints: params.curvePoints ? params.curvePoints.map((pt) => [pt[0], pt[1]]) : CURVE_POINTS.map((pt) => [...pt]),
+    frame: cloneFrame(params.frame),
   };
 }
 
 function snapshot() {
-  return { presetId: state.presetId, params: cloneParams(state.params) };
+  return { presetId: state.presetId, aspect: state.aspect, params: cloneParams(state.params) };
 }
 
 function pushHistory() {
@@ -182,6 +316,7 @@ function pushHistory() {
 function restoreSnap(snap) {
   state.presetId = snap.presetId;
   state.params = cloneParams(snap.params);
+  state.aspect = snap.aspect || 'free';
   rail.setActive(snap.presetId);
   panel.sync(state.params);
   updateReadout();
@@ -385,7 +520,10 @@ function adoptImage(img, name) {
     return;
   }
 
-  engine.load(img, w, h);
+  state.params.frame = cloneFrame(FRAME_DEFAULTS);
+  state.aspect = 'free';
+  if (state.cropMode) toggleCropMode(false);
+  engine.load(img, w, h, state.params.frame);
   state.hasAlpha = engine.detectAlpha();
   state.fileName = name;
   state.view = { zoom: 'fit', panX: 0, panY: 0 };
@@ -394,7 +532,9 @@ function adoptImage(img, name) {
   view.hidden = false;
   stageFrame.classList.toggle('transparent', state.hasAlpha);
 
-  dimsEl.textContent = `${w} × ${h}`;
+  dimsEl.textContent = `${frameSize(state.params.frame, engine.negative).width} × ${
+    frameSize(state.params.frame, engine.negative).height
+  }`;
   panel.setEnabled(true);
   panel.sync(state.params);
   needHistogram = true;
@@ -441,11 +581,13 @@ function openExport() {
 }
 
 function exportDimensions() {
+  // The file is the *print*, not the negative, so crop and rotation count.
+  const size = frameSize(state.params.frame, engine.negative);
   const target = Number(exportSize.value);
-  const long = Math.max(engine.width, engine.height);
-  if (!target || target >= long) return { w: engine.width, h: engine.height };
+  const long = Math.max(size.width, size.height);
+  if (!target || target >= long) return { w: size.width, h: size.height };
   const s = target / long;
-  return { w: Math.max(1, Math.round(engine.width * s)), h: Math.max(1, Math.round(engine.height * s)) };
+  return { w: Math.max(1, Math.round(size.width * s)), h: Math.max(1, Math.round(size.height * s)) };
 }
 
 function updateExportPreview() {
@@ -556,6 +698,221 @@ function zoomBy(direction) {
 function zoomFit() {
   state.view = { zoom: 'fit', panX: 0, panY: 0 };
   layoutView();
+}
+
+/* ------------------------------------------------------------------ */
+/* Crop overlay                                                        */
+/* ------------------------------------------------------------------ */
+
+const cropLayer = $('#cropLayer');
+
+function toggleCropMode(force) {
+  if (!engine.loaded) {
+    toast('Open a photo first');
+    return;
+  }
+  state.cropMode = force === undefined ? !state.cropMode : !!force;
+  if (state.cropMode) {
+    // Painting and cropping compete for the pointer; brush wins only when
+    // explicitly requested, so leave it here.
+    if (state.brush) { state.brush = false; updateBrushUi(); }
+    cropLayer.hidden = false;
+    stageFrame.classList.add('cropping');
+    setStatus('Crop · drag the frame, then press Enter to apply or Esc to cancel');
+    buildCropHandles();
+  } else {
+    cropLayer.hidden = true;
+    cropLayer.innerHTML = '';
+    stageFrame.classList.remove('cropping');
+    setStatus('Ready');
+  }
+  updateCropButton();
+}
+
+function updateCropButton() {
+  syncCropAction();
+}
+
+let cropBtnState = null;
+
+// The crop control lives in the panel (as an action row) and in the toolbar;
+// both must reflect the same mode.
+function syncCropAction() {
+  const row = panel.rows.get('cropMode');
+  if (row && row.button) row.button.setAttribute('aria-pressed', String(state.cropMode));
+  const toolbarBtn = document.querySelector('#cropBtn');
+  if (toolbarBtn) toolbarBtn.setAttribute('aria-pressed', String(state.cropMode));
+}
+
+const CROP_HANDLES = [
+  { id: 'nw', x: 0, y: 0, cursor: 'nwse-resize' },
+  { id: 'n', x: 0.5, y: 0, cursor: 'ns-resize' },
+  { id: 'ne', x: 1, y: 0, cursor: 'nesw-resize' },
+  { id: 'e', x: 1, y: 0.5, cursor: 'ew-resize' },
+  { id: 'se', x: 1, y: 1, cursor: 'nwse-resize' },
+  { id: 's', x: 0.5, y: 1, cursor: 'ns-resize' },
+  { id: 'sw', x: 0, y: 1, cursor: 'nesw-resize' },
+  { id: 'w', x: 0, y: 0.5, cursor: 'ew-resize' },
+];
+
+function buildCropHandles() {
+  cropLayer.innerHTML = '';
+
+  const shade = ['n', 's', 'e', 'w'].map((side) =>
+    el('div', { class: `crop-shade crop-shade-${side}`, 'aria-hidden': 'true' })
+  );
+
+  const frame = el('div', { class: 'crop-frame' }, [
+    el('div', { class: 'crop-thirds', 'aria-hidden': 'true' }),
+  ]);
+
+  for (const h of CROP_HANDLES) {
+    const handle = el('div', {
+      class: `crop-handle crop-handle-${h.id}`,
+      dataset: { handle: h.id },
+      'aria-hidden': 'true',
+    });
+    handle.style.cursor = h.cursor;
+    frame.append(handle);
+  }
+
+  cropLayer.append(...shade, frame);
+
+  // Drag the body to move the window; drag a handle to resize it.
+  frame.addEventListener('pointerdown', (event) => {
+    const handle = event.target.closest('[data-handle]');
+    startCropDrag(event, handle ? handle.dataset.handle : 'move');
+  });
+}
+
+let cropDrag = null;
+
+function startCropDrag(event, mode) {
+  if (!engine.loaded) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rect = view.getBoundingClientRect();
+  cropDrag = {
+    mode,
+    startX: event.clientX,
+    startY: event.clientY,
+    rect,
+    crop: { ...state.params.frame.crop },
+    ratio: aspectRatio(state.aspect, engine.negative),
+  };
+  cropLayer.setPointerCapture(event.pointerId);
+  cropLayer.classList.add('dragging');
+}
+
+cropLayer.addEventListener('pointermove', (event) => {
+  if (!cropDrag) return;
+  const { rect, crop, mode, ratio } = cropDrag;
+  if (!rect.width || !rect.height) return;
+
+  const dx = (event.clientX - cropDrag.startX) / rect.width;
+  const dy = (event.clientY - cropDrag.startY) / rect.height;
+
+  let { x, y, w, h } = crop;
+  // Translation happens in original-image space, so account for the crop size.
+  const stepX = dx;
+  const stepY = dy;
+
+  if (mode === 'move') {
+    x = Math.min(1 - w, Math.max(0, crop.x + stepX));
+    y = Math.min(1 - h, Math.max(0, crop.y + stepY));
+  } else {
+    const min = 0.06;
+    if (mode.includes('w')) {
+      const nx = Math.min(crop.x + crop.w - min, Math.max(0, crop.x + stepX));
+      w = crop.x + crop.w - nx;
+      x = nx;
+    }
+    if (mode.includes('e')) {
+      w = Math.min(1 - crop.x, Math.max(min, crop.w + stepX));
+    }
+    if (mode.includes('n')) {
+      const ny = Math.min(crop.y + crop.h - min, Math.max(0, crop.y + stepY));
+      h = crop.y + crop.h - ny;
+      y = ny;
+    }
+    if (mode.includes('s')) {
+      h = Math.min(1 - crop.y, Math.max(min, crop.h + stepY));
+    }
+
+    // Respect an aspect lock by deriving the missing dimension.
+    if (ratio && rect.width && rect.height) {
+      const imgRatio = engine.negative.width / engine.negative.height;
+      const targetW = h * ratio / imgRatio;
+      if (mode === 'n' || mode === 's') {
+        const cx = x + w / 2;
+        w = Math.min(1, targetW);
+        x = Math.max(0, Math.min(1 - w, cx - w / 2));
+      } else {
+        const targetH = (w * imgRatio) / ratio;
+        const cy = y + h / 2;
+        h = Math.min(1, targetH);
+        y = Math.max(0, Math.min(1 - h, cy - h / 2));
+      }
+    }
+  }
+
+  cropDrag.current = { x, y, w, h };
+  paintCropOverlay({ x, y, w, h });
+});
+
+function endCropDrag() {
+  if (!cropDrag) return;
+  const next = cropDrag.current;
+  cropDrag = null;
+  cropLayer.classList.remove('dragging');
+  if (next) {
+    const frame = state.params.frame;
+    frame.crop = next;
+    applyFrame(frame);
+    updateFrameReadout();
+  }
+}
+
+cropLayer.addEventListener('pointerup', endCropDrag);
+cropLayer.addEventListener('pointercancel', endCropDrag);
+
+/** Position the crop chrome over the print, in stage coordinates. */
+function paintCropOverlay(crop) {
+  if (!state.cropMode || !engine.loaded) return;
+  const c = crop || state.params.frame.crop;
+
+  const stageRect = stageFrame.getBoundingClientRect();
+  const viewRect = view.getBoundingClientRect();
+  if (!viewRect.width || !viewRect.height) return;
+
+  const left = viewRect.left - stageRect.left;
+  const top = viewRect.top - stageRect.top;
+
+  const x = left + c.x * viewRect.width;
+  const y = top + c.y * viewRect.height;
+  const w = c.w * viewRect.width;
+  const h = c.h * viewRect.height;
+
+  const frameEl = cropLayer.querySelector('.crop-frame');
+  if (!frameEl) return;
+  frameEl.style.left = `${x}px`;
+  frameEl.style.top = `${y}px`;
+  frameEl.style.width = `${w}px`;
+  frameEl.style.height = `${h}px`;
+
+  // Shading around the crop, so the discarded area reads as discarded.
+  const shades = cropLayer.querySelectorAll('.crop-shade');
+  const set = (node, l, t, ww, hh) => {
+    node.style.left = `${l}px`;
+    node.style.top = `${t}px`;
+    node.style.width = `${Math.max(0, ww)}px`;
+    node.style.height = `${Math.max(0, hh)}px`;
+  };
+  set(shades[0], 0, 0, stageRect.width, y);                                   // north
+  set(shades[1], 0, y + h, stageRect.width, stageRect.height - (y + h));       // south
+  set(shades[2], 0, y, x, h);                                                 // west
+  set(shades[3], x + w, y, stageRect.width - (x + w), h);                     // east
 }
 
 /* ------------------------------------------------------------------ */
@@ -858,6 +1215,14 @@ $('#shortcutsBtn').addEventListener('click', () => modals.openModal($('#shortcut
 brushBtn.addEventListener('click', () => toggleBrush());
 eraseBtn.addEventListener('click', () => toggleErase());
 
+$('#cropBtn').addEventListener('click', () => toggleCropMode());
+$('#rotateLeftBtn').addEventListener('click', () => rotateQuarter(-1));
+$('#rotateRightBtn').addEventListener('click', () => rotateQuarter(1));
+$('#flipBtn').addEventListener('click', () => {
+  toggleMirror('flipH');
+  $('#flipBtn').setAttribute('aria-pressed', String(state.params.frame.flipH));
+});
+
 exportFormat.addEventListener('change', updateExportPreview);
 exportSize.addEventListener('change', updateExportPreview);
 exportQuality.addEventListener('input', () => {
@@ -893,6 +1258,7 @@ const STATUS_LABEL = {
 };
 
 function openBatch() {
+  if (engine.loaded) batch.setReference(engine.negative.width, engine.negative.height);
   renderBatchList();
   modals.openModal(batchModal);
 }
@@ -1117,18 +1483,34 @@ window.addEventListener('keydown', (event) => {
 
   if (mod || event.altKey) return;
 
+  // Crop mode owns Enter and Escape.
+  if (state.cropMode) {
+    if (event.key === 'Enter') { event.preventDefault(); toggleCropMode(false); return; }
+    if (event.key === 'Escape') { event.preventDefault(); toggleCropMode(false); return; }
+    return;
+  }
+
   switch (event.key) {
+    case 'c': case 'C':
+      event.preventDefault();
+      toggleCropMode();
+      break;
+    case 'm': case 'M':
+      event.preventDefault();
+      toggleMirror('flipH');
+      break;
+    case '[':
+      if (event.shiftKey) { event.preventDefault(); rotateQuarter(-1); }
+      else setParam('maskSize', Math.max(2, state.params.maskSize - 2));
+      break;
+    case ']':
+      if (event.shiftKey) { event.preventDefault(); rotateQuarter(1); }
+      else setParam('maskSize', Math.min(40, state.params.maskSize + 2));
+      break;
     case 'b': case 'B':
       event.preventDefault();
       if (event.shiftKey) openBatch();
       else toggleBrush();
-      break;
-    case '[':
-      setParam('maskSize', Math.max(2, state.params.maskSize - 2));
-      if (state.brush) showBrushCursor(lastPointerEvent || { clientX: 0, clientY: 0 });
-      break;
-    case ']':
-      setParam('maskSize', Math.min(40, state.params.maskSize + 2));
       break;
     case 'o': case 'O':
       event.preventDefault();
@@ -1225,5 +1607,19 @@ window.addEventListener('beforeunload', () => {
     localStorage.setItem(STORAGE_KEY, state.presetId);
   } catch { /* private mode */ }
 });
+
+// A read-only handle for tests and for debugging from the console. It is
+// deliberately not used by any UI code path.
+export const debug = {
+  get state() { return state; },
+  get preset() { return PRESET_BY_ID[state.presetId]; },
+  get engine() { return engine; },
+  get history() { return history; },
+  get batch() { return batch; },
+  get frame() { return state.params.frame; },
+  get printSize() {
+    return engine.loaded ? frameSize(state.params.frame, engine.negative) : null;
+  },
+};
 
 boot();
