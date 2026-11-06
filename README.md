@@ -211,11 +211,11 @@ npm run build && node tools/test-deploy.mjs
   curve (including a monotonicity sweep), the dodge/burn mask, the ZIP writer,
   and the graphic effects (each one must leave both ink and paper and must
   modulate with the image rather than render a uniform screen)
-- `test-ui.mjs` — 132 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 137 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
-  cancel, the effects tab and its menu, loading a graphic stock,
-  light/dark theme, reset, keyboard
+  cancel, the aspect lock staying in sync with its control, the effects tab
+  and its menu, loading a graphic stock, light/dark theme, reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 

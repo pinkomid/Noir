@@ -719,6 +719,53 @@ if (aspectRow) {
   const pxH = f.crop.h * neg.height;
   check('aspect lock produces a square crop', Math.abs(pxW / pxH - 1) < 0.03,
     `${pxW.toFixed(0)}×${pxH.toFixed(0)}`);
+
+  // The label is the half that broke: the crop was square while the control
+  // still read "Free", because the lock was written to a second copy of the
+  // value that the panel never reads. Geometry alone cannot catch that, so
+  // assert the control itself and the params behind it.
+  check('the aspect select shows the ratio that was chosen',
+    select.value === '1:1', `select reads "${select.value}"`);
+  check('the chosen ratio is in the params the panel syncs from',
+    app.state.params.aspect === '1:1', String(app.state.params.aspect));
+  check('the aspect select is not reverted by the sync after applying',
+    select.value === app.state.params.aspect,
+    `select ${select.value} vs params ${app.state.params.aspect}`);
+
+  // ...and it must survive a full round trip through the other controls,
+  // which each call panel.sync() with the current params.
+  openTabFor('.group[data-group="tone"] input[aria-label="Exposure"]');
+  await wait(150);
+  check('the ratio survives switching tabs',
+    select.value === '1:1', `select reads "${select.value}" after a tab switch`);
+
+  // Reset returns it to Free, and the control must say so.
+  const aspectReset = aspectRow.querySelector('.reset-control');
+  if (aspectReset) {
+    aspectReset.click();
+    await wait(250);
+    check('resetting the aspect clears the lock in the control too',
+      select.value === 'orig' || select.value === 'free',
+      `select reads "${select.value}"`);
+  }
+}
+
+// Choosing an aspect must not mark the film stock as adjusted: the lock is
+// framing, not part of the look.
+{
+  const before = document.querySelector('.film-name').textContent;
+  const aspectRow2 = [...document.querySelectorAll('.select-row')].find((r) => r.querySelector('.panel-select'));
+  const sel = aspectRow2.querySelector('.panel-select');
+  sel.value = '16:9';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(280);
+  const after = document.querySelector('.film-name').textContent;
+  check('an aspect lock does not mark the stock as modified',
+    before.replace(' *', '') === after.replace(' *', ''),
+    `"${before}" → "${after}"`);
+  sel.value = '1:1';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(250);
 }
 
 // Switching stock must not disturb the crop
