@@ -14,6 +14,8 @@
  * proportional to pixel count, not to the number of controls.
  */
 
+import { drawFrame, frameSize, FRAME_DEFAULTS } from './geometry.js';
+
 const PREVIEW_EDGE = 1600;   // interactive preview resolution (long edge)
 const GRAIN_FIELD = 512;     // noise field size for film grain
 const LUT_CACHE_LIMIT = 64;
@@ -323,6 +325,8 @@ export class Darkroom {
     // surface. One overlay (dodge/burn) is stored as a single channel.
     this.mask = null;
     this.maskCtx = null;
+    this.frame = FRAME_DEFAULTS;
+    this.negative = { width: 0, height: 0 };
 
     this.scratch = document.createElement('canvas');   // blur target
     this.scratchCtx = this.scratch.getContext('2d', { willReadFrequently: true });
@@ -336,28 +340,47 @@ export class Darkroom {
     return this.source !== null;
   }
 
-  /** Adopt a decoded image. Returns the intrinsic dimensions. */
-  load(source, width, height) {
-    this.source = source;
-    this.width = width;
-    this.height = height;
-
-    const longEdge = Math.max(width, height);
+  /**
+   * Recompute the preview surface for a given frame. Called on load and
+   * whenever the crop changes, so the mask and the grain scale always
+   * match what is actually on screen.
+   */
+  refreshSurface(frame) {
+    if (!this.source) return;
+    const size = frameSize(frame, this.negative);
+    const longEdge = Math.max(size.width, size.height);
     const s = Math.min(1, PREVIEW_EDGE / longEdge);
-    this.surfaceW = Math.max(1, Math.round(width * s));
-    this.surfaceH = Math.max(1, Math.round(height * s));
+
+    this.surfaceW = Math.max(1, Math.round(size.width * s));
+    this.surfaceH = Math.max(1, Math.round(size.height * s));
 
     if (!this.surface) this.surface = document.createElement('canvas');
     this.surface.width = this.surfaceW;
     this.surface.height = this.surfaceH;
 
     const sctx = this.surface.getContext('2d');
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.globalAlpha = 1;
+    sctx.clearRect(0, 0, this.surfaceW, this.surfaceH);
     sctx.imageSmoothingEnabled = true;
     sctx.imageSmoothingQuality = 'high';
-    sctx.clearRect(0, 0, this.surfaceW, this.surfaceH);
-    sctx.drawImage(source, 0, 0, this.surfaceW, this.surfaceH);
+    drawFrame(sctx, this.surfaceW, this.surfaceH, this.source, frame || FRAME_DEFAULTS);
 
+    this.frame = frame;
     this.ensureMask();
+  }
+
+  /** Adopt a decoded image. Returns the intrinsic dimensions. */
+  load(source, width, height, frame) {
+    this.source = source;
+    this.width = width;
+    this.height = height;
+    // Intrinsic size, kept separately: `width`/`height` describe the
+    // negative, while the frame describes the print taken from it.
+    this.negative = { width, height };
+
+    this.refreshSurface(frame || FRAME_DEFAULTS);
     return { width, height };
   }
 
@@ -478,7 +501,11 @@ export class Darkroom {
     dctx.clearRect(0, 0, w, h);
     dctx.imageSmoothingEnabled = true;
     dctx.imageSmoothingQuality = 'high';
-    dctx.drawImage(source, 0, 0, w, h);
+
+    // Geometry first: crop, quarter turns, mirrors and straightening all
+    // land in one transform so the rest of the pipeline is unaware of it.
+    const frame = p.frame || FRAME_DEFAULTS;
+    drawFrame(dctx, w, h, source, frame);
 
     const minEdge = Math.min(w, h);
 

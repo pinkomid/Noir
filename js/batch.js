@@ -7,6 +7,7 @@
  */
 
 import { Darkroom } from './engine.js';
+import { frameSize, FRAME_DEFAULTS } from './geometry.js';
 
 const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -219,13 +220,20 @@ export class BatchJob {
     try {
       const img = await decode(url);
 
-      const long = Math.max(img.naturalWidth, img.naturalHeight);
-      const scale = longEdge && longEdge < long ? longEdge / long : 1;
-      const w = Math.max(1, Math.round(img.naturalWidth * scale));
-      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      // Every negative gets the same crop recipe as the one on screen. If the
+      // crop would land outside a differently-shaped photo, fall back to the
+      // full frame rather than cutting off the subject.
+      const frame = params.frame && this._frameFits(params.frame, img.naturalWidth, img.naturalHeight)
+        ? params.frame
+        : FRAME_DEFAULTS;
 
-      // Each negative goes through the same engine; adopt() re-points it.
-      this.engine.load(img, img.naturalWidth, img.naturalHeight);
+      this.engine.load(img, img.naturalWidth, img.naturalHeight, frame);
+
+      const size = frameSize(frame, this.engine.negative);
+      const long = Math.max(size.width, size.height);
+      const scale = longEdge && longEdge < long ? longEdge / long : 1;
+      const w = Math.max(1, Math.round(size.width * scale));
+      const h = Math.max(1, Math.round(size.height * scale));
 
       const canvas = document.createElement('canvas');
       canvas.width = w;
@@ -247,6 +255,20 @@ export class BatchJob {
     } finally {
       URL.revokeObjectURL(url);
     }
+  }
+
+  /** A crop is only safe on negatives at least as large as the reference. */
+  _frameFits(frame, width, height) {
+    if (!frame || !frame.crop) return true;
+    const c = frame.crop;
+    if (c.w <= 0 || c.h <= 0) return false;
+    // Refuse crops that were drawn on a much smaller source.
+    return !this._reference || (width >= this._reference.width * 0.85 && height >= this._reference.height * 0.85);
+  }
+
+  /** Remember the negative the crop was authored on. */
+  setReference(width, height) {
+    this._reference = { width, height };
   }
 
   /** Build the archive for everything that finished. */

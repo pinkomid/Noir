@@ -16,6 +16,28 @@ export const CURVE_POINTS = [
 
 export const GROUPS = [
   {
+    id: 'transform',
+    title: 'Crop & transform',
+    open: true,
+    controls: [
+      { id: 'cropMode', type: 'action', label: 'Crop', def: null },
+      { id: 'straighten', type: 'slider', label: 'Straighten', min: -45, max: 45, step: 0.1, def: 0, digits: 1, unit: '°' },
+      { id: 'aspect', type: 'select', label: 'Aspect', def: 'free',
+        options: [
+          { value: 'free', label: 'Free' },
+          { value: 'orig', label: 'Original' },
+          { value: '1:1', label: '1:1 Square' },
+          { value: '4:5', label: '4:5 Portrait' },
+          { value: '5:4', label: '5:4' },
+          { value: '3:2', label: '3:2' },
+          { value: '2:3', label: '2:3' },
+          { value: '16:9', label: '16:9' },
+          { value: '2.39:1', label: 'Scope 2.39' },
+        ] },
+      { id: 'frameNote', type: 'note', label: 'Crop opens a draggable frame on the print. Rotation and mirrors are applied to the whole frame.' },
+    ],
+  },
+  {
     id: 'tone',
     title: 'Tone',
     open: true,
@@ -85,6 +107,17 @@ export const GROUPS = [
     open: false,
     controls: [
       { id: 'vignette', type: 'slider', label: 'Vignette', min: -100, max: 100, step: 1, def: 0 },
+    ],
+  },
+  {
+    id: 'orient',
+    title: 'Rotate & mirror',
+    open: false,
+    controls: [
+      { id: 'rotateLeft', type: 'action', label: 'Rotate left 90°', def: null },
+      { id: 'rotateRight', type: 'action', label: 'Rotate right 90°', def: null },
+      { id: 'flipH', type: 'toggle', label: 'Mirror horizontally', def: false },
+      { id: 'flipV', type: 'toggle', label: 'Mirror vertically', def: false },
     ],
   },
 ];

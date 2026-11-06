@@ -22,6 +22,7 @@ const modules = {
   'js/controls.js': readFileSync('js/controls.js', 'utf8'),
   'js/ui.js': readFileSync('js/ui.js', 'utf8'),
   'js/batch.js': readFileSync('js/batch.js', 'utf8'),
+  'js/geometry.js': readFileSync('js/geometry.js', 'utf8'),
   'js/app.js': readFileSync('js/app.js', 'utf8'),
 };
 
@@ -193,6 +194,7 @@ function runModule(path) {
     .replace(/^export\s+default\s+/gm, 'const __default = ');
 
   const names = [...source.matchAll(/^export\s+(?:const|let|function|class)\s+([\w$]+)/gm)].map((m) => m[1]);
+  if (path === 'js/app.js' && process.env.NOIR_DEBUG_EXPORTS) console.log('   app.js exports:', names);
   const body = `'use strict';\n${code}\nconst __exp = {};\n`
     + names.map((n) => `__exp[${JSON.stringify(n)}] = typeof ${n} !== 'undefined' ? ${n} : undefined;`).join('\n')
     + '\nreturn __exp;';
@@ -345,7 +347,7 @@ await wait(150);
 check('curve toggle turns on', curveToggle.getAttribute('aria-checked') === 'true');
 
 // Emit a shaped curve and confirm it reaches the parameters.
-const app = moduleCache.get('js/app.js');
+const app = moduleCache.get('js/app.js').exports;
 document.querySelector('.curve-reset').click();
 await wait(120);
 check('curve reset restores the identity', (() => {
@@ -378,7 +380,7 @@ stage.dispatchEvent(pointer('pointermove', 300, 380));
 stage.dispatchEvent(pointer('pointerup', 300, 380));
 await wait(250);
 
-const engineModule = moduleCache.get('js/engine.js');
+const engineModule = moduleCache.get('js/engine.js').exports;
 check('a brush stroke paints the mask', app.state ? true : true);
 
 // The stage should offer a brush cursor element while brushing.
@@ -443,6 +445,140 @@ check('batch downloads a zip', !!zipName, zipName);
 window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 await wait(150);
 check('escape closes the batch dialog', batchModal.hidden === true);
+
+// --- Crop / rotate / mirror -------------------------------------------
+console.log('\ncrop + transform:');
+
+const appModule = moduleCache.get('js/app.js').exports;
+if (process.env.NOIR_DEBUG_EXPORTS) console.log('   app keys:', Object.keys(appModule), 'debug:', typeof appModule.debug);
+const appState = appModule.debug;
+
+check('transform group is rendered', !!document.querySelector('.group[data-group="transform"]'));
+check('rotate & mirror group is rendered', !!document.querySelector('.group[data-group="orient"]'));
+
+const cropBtn = document.querySelector('#cropBtn');
+check('crop toolbar button exists', !!cropBtn);
+cropBtn.click();
+await wait(200);
+check('crop mode opens', cropBtn.getAttribute('aria-pressed') === 'true',
+  cropBtn.getAttribute('aria-pressed'));
+check('crop overlay is visible', document.querySelector('#cropLayer').hidden === false);
+check('crop frame is built', !!document.querySelector('.crop-frame'));
+check('crop handles are built', document.querySelectorAll('.crop-handle').length === 8,
+  `${document.querySelectorAll('.crop-handle').length} handles`);
+
+// Drag a corner handle to shrink the crop.
+const handle = document.querySelector('.crop-handle-se');
+const cropLayer = document.querySelector('#cropLayer');
+cropLayer.setPointerCapture = () => {};
+cropLayer.releasePointerCapture = () => {};
+cropLayer.getBoundingClientRect = () => ({ left: 0, top: 0, width: 560, height: 700, right: 560, bottom: 700 });
+
+function cropEvent(type, x, y) {
+  const e = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.assign(e, { clientX: x, clientY: y, button: 0, pointerId: 2 });
+  return e;
+}
+
+handle.dispatchEvent(cropEvent('pointerdown', 560, 700));
+cropLayer.dispatchEvent(cropEvent('pointermove', 420, 520));
+cropLayer.dispatchEvent(cropEvent('pointerup', 420, 520));
+await wait(300);
+
+check('dragging a handle changes the crop', (() => {
+  const f = appState.state.params.frame;
+  return f.crop.w < 0.99 || f.crop.h < 0.99;
+})(), JSON.stringify(appState.state.params.frame?.crop));
+
+cropBtn.click();
+await wait(200);
+check('crop mode closes', cropBtn.getAttribute('aria-pressed') === 'false');
+check('crop overlay hides', document.querySelector('#cropLayer').hidden === true);
+
+// Rotation
+const beforeRot = appState.state.params.frame.rotation;
+document.querySelector('#rotateRightBtn').click();
+await wait(250);
+check('rotate right advances a quarter turn',
+  appState.state.params.frame.rotation === (beforeRot + 1) % 4,
+  `${beforeRot} → ${appState.state.params.frame.rotation}`);
+
+const beforeLeft = appState.state.params.frame.rotation;
+document.querySelector('#rotateLeftBtn').click();
+await wait(250);
+check('rotate left steps back',
+  appState.state.params.frame.rotation === (beforeLeft + 3) % 4,
+  `${beforeLeft} → ${appState.state.params.frame.rotation}`);
+
+// Mirror
+document.querySelector('#flipBtn').click();
+await wait(250);
+check('mirror toggles on', appState.state.params.frame.flipH === true);
+check('mirror button reflects state',
+  document.querySelector('#flipBtn').getAttribute('aria-pressed') === 'true');
+document.querySelector('#flipBtn').click();
+await wait(250);
+check('mirror toggles off', appState.state.params.frame.flipH === false);
+
+// Straighten slider
+const straighten = document.querySelector('input[type=range][aria-label="Straighten"]');
+check('straighten slider exists', !!straighten);
+if (straighten) {
+  straighten.value = '6';
+  straighten.dispatchEvent(new window.Event('input', { bubbles: true }));
+  straighten.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(300);
+  check('straighten reaches the frame', Math.abs(appState.state.params.frame.straighten - 6) < 0.01,
+    String(appState.state.params.frame.straighten));
+  straighten.value = '0';
+  straighten.dispatchEvent(new window.Event('input', { bubbles: true }));
+  straighten.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(200);
+}
+
+// Aspect lock
+const aspectSelect = document.querySelector('.panel-select');
+const aspectRow = [...document.querySelectorAll('.select-row')].find((r) => r.querySelector('.panel-select'));
+check('aspect select exists', !!aspectRow);
+if (aspectRow) {
+  const select = aspectRow.querySelector('.panel-select');
+  select.value = '1:1';
+  select.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(300);
+  const f = appState.state.params.frame;
+  const neg = { width: 1122, height: 1402 };
+  const pxW = f.crop.w * neg.width;
+  const pxH = f.crop.h * neg.height;
+  check('aspect lock produces a square crop', Math.abs(pxW / pxH - 1) < 0.03,
+    `${pxW.toFixed(0)}×${pxH.toFixed(0)}`);
+}
+
+// Switching stock must not disturb the crop
+const cropBeforeStock = JSON.stringify(appState.state.params.frame.crop);
+document.querySelector('.preset[data-id="acros"]').click();
+await wait(250);
+check('changing film stock preserves the crop',
+  JSON.stringify(appState.state.params.frame.crop) === cropBeforeStock);
+
+// Export must describe the print, not the negative. A square crop of a
+// portrait negative is 1122 wide but 1122 tall, versus the original 1402.
+document.querySelector('#exportBtn').click();
+await wait(250);
+const exportMetaText = document.querySelector('#exportMeta').textContent;
+const [exportW, exportH] = exportMetaText.split('·')[0].split('×').map((n) => parseInt(n.trim(), 10));
+check('export size follows the crop', exportH < 1402 && Math.abs(exportW - exportH) < 4,
+  `${exportW}×${exportH} (negative 1122×1402)`);
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await wait(150);
+
+// Reset clears the geometry
+document.querySelector('#resetBtn').click();
+await wait(300);
+check('reset clears the frame', (() => {
+  const f = appState.state.params.frame;
+  return f.rotation === 0 && !f.flipH && !f.flipV
+    && Math.abs(f.crop.w - 1) < 1e-6 && Math.abs(f.crop.h - 1) < 1e-6;
+})(), JSON.stringify(appState.state.params.frame));
 
 // --- Reset -------------------------------------------------------------
 document.querySelector('#resetBtn').click();

@@ -8,6 +8,7 @@
 import { GROUPS, formatValue, valueRatio, CURVE_POINTS } from './controls.js';
 import { TONES } from './presets.js';
 import { curveInterpolator } from './engine.js';
+import { isNeutralFrame } from './geometry.js';
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -144,6 +145,14 @@ export function buildPanel(container, handlers) {
         const built = buildCurve(control, handlers);
         rows.set(control.id, { ...built, control, group: group.id });
         inner.append(built.row);
+      } else if (control.type === 'action') {
+        const built = buildAction(control, handlers);
+        rows.set(control.id, { ...built, control, group: group.id });
+        inner.append(built.row);
+      } else if (control.type === 'select') {
+        const built = buildSelect(control, handlers);
+        rows.set(control.id, { ...built, control, group: group.id });
+        inner.append(built.row);
       }
     }
 
@@ -177,6 +186,12 @@ export function buildPanel(container, handlers) {
         } else if (entry.control.type === 'curve') {
           entry.setPoints(value);
           entry.row.classList.toggle('is-modified', isModified);
+        } else if (entry.control.type === 'select') {
+          if (entry.select.value !== String(value)) entry.select.value = String(value);
+          entry.row.classList.toggle('is-modified', isModified);
+        } else if (entry.control.type === 'action') {
+          // Actions hold no value; they light up while their mode is active.
+          entry.row.classList.toggle('is-modified', !!(entry.control.isActive && entry.control.isActive()));
         } else {
           for (const button of entry.buttons) {
             button.setAttribute('aria-pressed', String(button.dataset.value === String(value)));
@@ -500,6 +515,38 @@ function buildCurve(control, handlers) {
       draw();
     },
   };
+}
+
+function buildAction(control, handlers) {
+  const button = el('button', {
+    class: 'action-btn',
+    type: 'button',
+    'aria-pressed': 'false',
+  }, [
+    el('span', { class: 'action-label', text: control.label }),
+    el('span', { class: 'action-key', text: control.shortcut ? control.shortcut : '' }),
+  ]);
+
+  button.addEventListener('click', () => handlers.onAction(control.id));
+
+  const row = el('div', { class: 'action-row' }, [button]);
+  return { row, button };
+}
+
+function buildSelect(control, handlers) {
+  const select = el('select', { class: 'panel-select', 'aria-label': control.label },
+    (control.options || []).map((opt) =>
+      el('option', { value: opt.value, text: opt.label })
+    )
+  );
+
+  select.addEventListener('change', () => handlers.onChange(control.id, select.value, { commit: true }));
+
+  const row = el('div', { class: 'select-row' }, [
+    el('span', { class: 'slider-label', text: control.label }),
+    select,
+  ]);
+  return { row, select };
 }
 
 /* ------------------------------------------------------------------ */
