@@ -1,13 +1,23 @@
 # NOIR Studio
 
-Two tools in one workspace:
+Two tools behind one front door. `index.html` is a chooser: pick a workspace and
+you land on its own page.
 
-- **Photo editor** (right) — a private, in-browser black & white darkroom. Drop in
-  a photograph, choose a film stock, and develop a finished monochrome print, then
+```
+index.html      choose a workspace
+├── profile.html    an editor for 3DXChat biographies
+└── photo.html      the black & white darkroom
+```
+
+- **Profile editor** — builds a biography for **3DXChat**, checked against that
+  editor's own rules before you paste it: only `b`, `i`, `color` and `size` tags,
+  balanced and nested correctly, 1000 characters counting line breaks.
+- **Photo editor** — a private, in-browser black & white darkroom. Drop in a
+  photograph, choose a film stock, and develop a finished monochrome print, then
   export it at full resolution.
-- **Profile editor** (left) — builds a biography for **3DXChat**, checked against
-  that editor's own rules before you paste it: only `b`, `i`, `color` and `size`
-  tags, balanced and nested correctly, 1000 characters counting line breaks.
+
+Both carry a back link to the chooser, and the light/dark choice follows you
+between all three pages.
 
 Everything runs on your own device. **Nothing is uploaded**; there is no backend,
 no account, and no tracking. The profile draft is saved in `localStorage` on this
@@ -76,6 +86,9 @@ paste, so the checks run before you copy:
 | Glyph safety | supplementary-plane characters (emoji, gothic `𝔏𝔬𝔳𝔢𝔶`) and BMP glyphs missing from the client font such as `⛧` |
 
 ### Layout
+
+The editor is the page: header on top, form and preview side by side underneath,
+stacking on a phone with the preview first.
 
 - **Identity** — name (32 limit, tracked), pronouns, orientation, languages.
 - **Personality** — four sliders. They only emit a word at 2 and 4, so a quiet
@@ -256,10 +269,11 @@ draft buffer for responsiveness, then a full-quality pass on release.
 ### Source layout
 
 ```
-index.html            the split workspace: both panes, one entry point
-project/shell.js      boots NOIR inside the right pane, wires the split
-project/profile/      the profile editor: data, compose, validate, panel
-styles/profile.css    the split layout and the profile pane
+index.html            the chooser: two links, no app code
+profile.html          the profile editor page
+photo.html            the darkroom page (NOIR, unchanged)
+project/profile/      the profile editor: data, compose, validate, panel, page
+styles/profile.css    the chooser, shared page chrome, and the profile editor
 styles/main.css       NOIR's design system
 js/engine.js          canvas pipeline: LUT, grain field, toning, histogram
 js/fx.js              graphic effects: threshold, halftone, dither, xerox, riso
@@ -275,9 +289,14 @@ tools/test-ui.mjs     boots the real UI in jsdom and drives the user journeys
 tools/test-deploy.mjs verifies the Pages build is self-contained
 ```
 
-`js/app.js` is imported by `project/shell.js` rather than loaded by its own
-script tag, so there is exactly one entry point and the darkroom cannot boot
-twice.
+Each workspace loads exactly one module (`js/app.js` or
+`project/profile/page.js`), and the chooser loads none — opening the site does
+not boot an app behind a menu.
+
+An earlier revision put both tools on one page, side by side. That is gone: the
+darkroom sizes its own layout from the viewport, and squeezing it into a pane
+meant a 176px rail and a 300px panel. On its own page it gets the widths it was
+designed for.
 
 ---
 
@@ -300,7 +319,7 @@ npm run build && node tools/test-deploy.mjs
   colour values, the counting rule, the 1000 boundary, and glyph safety for both
   supplementary-plane characters and BMP glyphs the client font lacks. Every
   font, palette, frame and template must compose to something valid.
-- `test-ui.mjs` — 200 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 206 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
   cancel, the aspect lock staying in sync with its control, the effects tab
@@ -309,9 +328,10 @@ npm run build && node tools/test-deploy.mjs
   switcher, driving the profile form end to end (preview, counters, palette,
   frame, font, colour and centring switches, templates, draft persistence,
   reset), light/dark theme, reset, keyboard
-- `test-deploy.mjs` — 25 checks: the Pages build ships every referenced file
-  including the whole `project/` tree, contains no root-absolute paths, has a
-  single module entry point, and publishes no test tooling or zip uploads
+- `test-deploy.mjs` — 31 checks: all three pages ship, every internal link
+  resolves to a published file, the whole `project/` tree is published, no page
+  uses a root-absolute path, each page has one entry point and its own title,
+  and no test tooling or zip uploads are published
 
 `test-engine.mjs` also writes `tools/out/preset-sheet.png` and a full-resolution
 export, so visual regressions are easy to spot.
@@ -332,7 +352,7 @@ confirmed in a browser on a real device.
 
 ## Deploying to GitHub Pages
 
-The live site is **https://pinkomid.github.io/Noir-Photo-Studio/**.
+The live site is **https://pinkomid.github.io/Noir/**.
 
 `.github/workflows/deploy-pages.yml` assembles a minimal `_site` (app files only —
 no tests, no tooling), fails the build if any root-absolute path slips in, and
@@ -344,7 +364,7 @@ deploys automatically on each merge to `main`.
 
 `npm run build` produces the same `_site` locally, and `node tools/test-deploy.mjs`
 checks it — including that the app still works when served from the
-`/Noir-Photo-Studio/` subpath a project page uses.
+`/Noir/` subpath a project page uses.
 
 ## Browser support
 

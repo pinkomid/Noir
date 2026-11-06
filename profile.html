@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>NOIR Profile Editor — 3DXChat Biography</title>
+<meta name="description" content="Build a 3DXChat biography that the game will actually accept: only supported tags, balanced nesting, and a real character count. Everything stays in your browser." />
+<meta name="theme-color" content="#0a0a0b" />
+<meta name="color-scheme" content="dark light" />
+<link rel="stylesheet" href="styles/main.css" />
+<link rel="stylesheet" href="styles/profile.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0a0b'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='19' fill='%23e9e4da' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E" />
+<script>
+try {
+  var t = localStorage.getItem('noir.theme');
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+} catch (e) { /* private mode */ }
+</script>
+</head>
+<body class="profile-page">
+
+<a class="back-link" href="./" title="Back to NOIR Studio">
+  <span aria-hidden="true">←</span> NOIR Studio
+</a>
+
+<header class="page-head">
+  <div class="page-title">
+    <h1>Profile editor</h1>
+    <p>Biography text for 3DXChat · validated against the game's rules</p>
+  </div>
+  <span class="page-badge">1000 characters</span>
+</header>
+
+<main class="profile-main" id="profilePanel"></main>
+
+<script type="module" src="project/profile/page.js"></script>
+
+</body>
+</html>

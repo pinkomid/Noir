@@ -58,6 +58,38 @@ const html = readFileSync(join(site, 'index.html'), 'utf8');
 const absolute = [...html.matchAll(/(?:src|href)="(\/[^/][^"]*)"/g)].map((m) => m[1]);
 check('no root-absolute references in the HTML', absolute.length === 0, absolute.join(', '));
 
+/* All three pages must ship, and the chooser's links must land on real files.
+   A broken link on the front page is the worst failure this site can have. */
+const PAGES = ['index.html', 'photo.html', 'profile.html'];
+const missingPages = PAGES.filter((f) => !files.includes(join(site, f)));
+check('every page is published', missingPages.length === 0, missingPages.join(', ') || PAGES.join(', '));
+
+const deadLinks = [];
+for (const page of PAGES) {
+  if (!existsSync(join(site, page))) continue;
+  const source = readFileSync(join(site, page), 'utf8');
+  for (const m of source.matchAll(/<a[^>]+href="([^"]+)"/g)) {
+    const href = m[1];
+    if (/^(https?:|mailto:|#)/.test(href)) continue;
+    // "./" means the directory index.
+    const target = href === './' || href === '.' ? 'index.html' : href.split(/[?#]/)[0];
+    if (!existsSync(join(site, target))) deadLinks.push(`${page} → ${href}`);
+  }
+}
+check('every internal link resolves to a published file', deadLinks.length === 0,
+  deadLinks.join(' | '));
+
+const absoluteOnPages = [];
+for (const page of PAGES) {
+  if (!existsSync(join(site, page))) continue;
+  const source = readFileSync(join(site, page), 'utf8');
+  for (const m of source.matchAll(/(?:src|href)="(\/[^/][^"]*)"/g)) {
+    absoluteOnPages.push(`${page} → ${m[1]}`);
+  }
+}
+check('no page uses a root-absolute path', absoluteOnPages.length === 0,
+  absoluteOnPages.join(' | ') || 'all relative');
+
 /**
  * Broken relative reference = blank page on Pages. Walk every reference in
  * the HTML and in the JS modules the page loads.
@@ -125,9 +157,14 @@ check('every profile-editor file is published', projectMissing.length === 0,
 check('the profile stylesheet is published',
   files.includes(join(site, 'styles', 'profile.css')));
 
-check('the shell is the page\'s only entry point',
-  (html.match(/<script type="module"/g) || []).length === 1,
-  'a second script tag would boot the darkroom twice');
+check('each page has exactly one module entry point', (() => {
+  const counts = PAGES.filter((f) => existsSync(join(site, f))).map((f) => {
+    const source = readFileSync(join(site, f), 'utf8');
+    return (source.match(/<script type="module"/g) || []).length;
+  });
+  // The chooser has none; each workspace has exactly one.
+  return counts[0] === 0 && counts.slice(1).every((n) => n === 1);
+})(), 'a second script tag would boot an app twice');
 
 /* Every module the shell imports must resolve inside the published tree. */
 const shellPath = join(site, 'project', 'shell.js');
@@ -158,7 +195,15 @@ check('the zip upload is not published',
 check('page declares a language', /<html[^>]+lang=/.test(html));
 check('responsive viewport is declared', /name="viewport"/.test(html));
 check('a favicon is inlined (no 404 on Pages)', /rel="icon"/.test(html));
-check('demo photos are lazily usable offline', /sample-portrait\.jpg/.test(html));
+// The darkroom moved to its own page; that is where the sample is referenced.
+const photoHtml = readFileSync(join(site, 'photo.html'), 'utf8');
+check('demo photos are lazily usable offline', /sample-portrait\.jpg/.test(photoHtml));
+check('the chooser declares a language', /<html[^>]+lang=/.test(html));
+check('every page declares a language',
+  PAGES.every((f) => /<html[^>]+lang=/.test(readFileSync(join(site, f), 'utf8'))));
+check('every page has its own title',
+  PAGES.every((f) => /<title>[^<]{5,}<\/title>/.test(readFileSync(join(site, f), 'utf8'))),
+  'three pages sharing one title makes tabs impossible to tell apart');
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.filter((r) => r.ok).length}/${results.length} checks passed`);
