@@ -1,0 +1,13 @@
+{
+  "name": "noir-photo-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NOIR Photo Studio — a private, in-browser black & white darkroom.",
+  "type": "module",
+  "scripts": {
+    "dev": "python3 -m http.server 5173 --bind 0.0.0.0",
+    "start": "python3 -m http.server 5173 --bind 0.0.0.0"
+  },
+  "keywords": ["photography", "black-and-white", "darkroom", "canvas", "image-editor"],
+  "license": "MIT"
+}
