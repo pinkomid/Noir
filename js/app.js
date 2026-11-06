@@ -47,8 +47,22 @@ const state = {
   brush: false,
   erase: false,
   cropMode: false,
-  aspect: 'free',
 };
+
+/**
+ * The aspect lock lives in `params.aspect`, because that is where the select
+ * control reads it from. Keeping a second copy on `state` and writing only
+ * that one is exactly how the panel came to say "Free" while the frame was
+ * square: applyAspect() set state.aspect, then applyFrame() re-synced the
+ * panel from params and put the select back.
+ *
+ * One object, one accessor. There is no setter on purpose — writes have to go
+ * through applyAspect() so the crop is actually reshaped; silently assigning
+ * a lock that nothing applies would be a new bug, not a fix.
+ */
+function currentAspect() {
+  return (state.params && state.params.aspect) || 'free';
+}
 
 const history = { stack: [], index: -1 };
 
@@ -125,7 +139,7 @@ let panel = buildPanel(panelBody, {
   },
   onReset: (id) => {
     if (id === 'straighten' || id === 'aspect') {
-      if (id === 'aspect') { state.aspect = 'orig'; applyAspect('orig'); }
+      if (id === 'aspect') { applyAspect('orig'); }
       else setParam(id, CONTROL_DEFAULTS[id], true);
       return;
     }
@@ -189,7 +203,7 @@ function applyPreset(id, commit = false) {
 function resetAll() {
   setPresetSilently(PRESETS[0].id);
   state.params = withFrame(paramsFor(PRESETS[0].id), FRAME_DEFAULTS);
-  state.aspect = 'free';
+  state.params.aspect = 'free';
   if (state.cropMode) toggleCropMode(false);
   engine.refreshSurface(state.params.frame);
   syncFrameControls();
@@ -287,7 +301,8 @@ function rotateQuarter(direction) {
   const frame = state.params.frame;
   frame.rotation = ((frame.rotation + direction) % 4 + 4) % 4;
   // A quarter turn swaps the print's axes, so an aspect lock may no longer hold.
-  if (state.aspect !== 'free') applyAspect(state.aspect, { silent: true });
+  const locked = currentAspect();
+  if (locked !== 'free') applyAspect(locked, { silent: true });
   commitFrame(frame, { resetMask: true });
   updateFrameReadout();
   repaintCrop();
@@ -304,7 +319,9 @@ function toggleMirror(axis) {
 
 function applyAspect(aspectId, { silent = false } = {}) {
   if (!engine.loaded) return;
-  state.aspect = aspectId;
+  // The write that keeps the select honest. applyFrame() -> panel.sync() runs
+  // after this, so the control reads the value it was just given.
+  state.params.aspect = aspectId;
 
   const ratio = aspectRatio(aspectId, engine.negative);
   const frame = state.params.frame;
@@ -323,7 +340,7 @@ function applyAspect(aspectId, { silent = false } = {}) {
 
 function resetFrame() {
   if (!engine.loaded) return;
-  state.aspect = 'free';
+  state.params.aspect = 'free';
   commitFrame(FRAME_DEFAULTS, { resetMask: true });
   updateFrameReadout();
 }
@@ -379,7 +396,7 @@ function cloneParams(params) {
 }
 
 function snapshot() {
-  return { presetId: state.presetId, aspect: state.aspect, params: cloneParams(state.params) };
+  return { presetId: state.presetId, aspect: currentAspect(), params: cloneParams(state.params) };
 }
 
 function pushHistory() {
@@ -397,7 +414,8 @@ function pushHistory() {
 function restoreSnap(snap) {
   state.presetId = snap.presetId;
   state.params = cloneParams(snap.params);
-  state.aspect = snap.aspect || 'free';
+  // Older snapshots kept the lock on the snapshot rather than in params.
+  if (state.params.aspect === undefined) state.params.aspect = snap.aspect || 'free';
   rail.setActive(snap.presetId);
   panel.sync(state.params);
   updateReadout();
@@ -445,7 +463,11 @@ function updateReadout() {
 
 function isModified() {
   const base = paramsFor(state.presetId);
+  // `aspect` now lives in params so the panel can read it, but it is a framing
+  // lock rather than part of the look. Counting it would put a "*" on the
+  // stock the moment you picked a crop ratio.
   for (const key of Object.keys(base)) {
+    if (key === 'aspect') continue;
     if (String(base[key]) !== String(state.params[key])) return true;
   }
   return false;
@@ -631,7 +653,7 @@ function adoptImage(img, name) {
   }
 
   state.params.frame = cloneFrame(FRAME_DEFAULTS);
-  state.aspect = 'free';
+  state.params.aspect = 'free';
   if (state.cropMode) toggleCropMode(false);
   engine.load(img, w, h, state.params.frame);
   state.hasAlpha = engine.detectAlpha();
@@ -1056,7 +1078,7 @@ function startCropDrag(event, mode) {
     // Work in print space: the overlay lives on the print, while the stored
     // crop is expressed against the negative.
     rect: currentPrintCrop(),
-    ratio: aspectRatio(state.aspect, engine.negative),
+    ratio: aspectRatio(currentAspect(), engine.negative),
     printRatio: box.width / Math.max(1, box.height),
   };
   cropLayer.setPointerCapture(event.pointerId);
