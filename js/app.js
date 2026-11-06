@@ -12,7 +12,7 @@ import {
   fitCropToAspect, isNeutralFrame, cloneFrame,
   cropToPrintRect, printRectToCrop,
 } from './geometry.js';
-import { PRESETS, PRESET_BY_ID, paramsFor } from './presets.js';
+import { PRESETS, ALL_PRESETS, PRESET_BY_ID, paramsFor } from './presets.js';
 import { DEFAULTS as CONTROL_DEFAULTS, CURVE_POINTS, ALL_CONTROLS } from './controls.js';
 import {
   $, el, buildPresetRail, buildPanel, drawHistogram,
@@ -134,7 +134,7 @@ let panel = buildPanel(panelBody, {
   onAction: (id) => handleAction(id),
 });
 
-const rail = buildPresetRail($('#presetList'), PRESETS, SAMPLE_THUMB, (id) => applyPreset(id, true));
+const rail = buildPresetRail($('#presetList'), ALL_PRESETS, SAMPLE_THUMB, (id) => applyPreset(id, true));
 
 panel.setEnabled(false);
 
@@ -172,6 +172,9 @@ function applyPreset(id, commit = false) {
   // Reveal the groups this stock relies on.
   if (preset.params.grain > 40) panel.openGroup('grain', true);
   if (preset.params.toneStrength > 0) panel.openGroup('toning', true);
+  // A graphic stock is defined by its effect; open the tab that owns it so
+  // the look is visibly a dial you can turn, not a mystery.
+  if (preset.params.fx && preset.params.fx !== 'none') panel.openGroup('fx', true);
 
   scheduleRender({ histogram: true });
   if (commit) pushHistory();
@@ -1773,17 +1776,17 @@ window.addEventListener('keydown', (event) => {
       modals.openModal($('#shortcutsModal'));
       break;
     case 'ArrowRight': {
-      const i = PRESETS.findIndex((p) => p.id === state.presetId);
-      applyPreset(PRESETS[(i + 1) % PRESETS.length].id, true);
+      const i = ALL_PRESETS.findIndex((p) => p.id === state.presetId);
+      applyPreset(ALL_PRESETS[(i + 1) % ALL_PRESETS.length].id, true);
       break;
     }
     case 'ArrowLeft': {
-      const i = PRESETS.findIndex((p) => p.id === state.presetId);
-      applyPreset(PRESETS[(i - 1 + PRESETS.length) % PRESETS.length].id, true);
+      const i = ALL_PRESETS.findIndex((p) => p.id === state.presetId);
+      applyPreset(ALL_PRESETS[(i - 1 + ALL_PRESETS.length) % ALL_PRESETS.length].id, true);
       break;
     }
     default: {
-      const preset = PRESETS.find((p) => p.key === event.key);
+      const preset = ALL_PRESETS.find((p) => p.key === event.key);
       if (preset) applyPreset(preset.id, true);
     }
   }

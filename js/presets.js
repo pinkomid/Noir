@@ -186,7 +186,199 @@ export const PRESETS = [
   },
 ];
 
-export const PRESET_BY_ID = Object.fromEntries(PRESETS.map((p) => [p.id, p]));
+/**
+ * Hard-graphic stocks. These are not film emulations — they are print
+ * processes: photocopiers, risographs, screen prints and zine layouts, where
+ * the picture has been quantised and the surface has started to fail.
+ *
+ * They live in their own group because they behave differently from the
+ * darkroom stocks: tone carries far less of the look and `fx` carries most of
+ * it, so the two families would read as one confusing list together.
+ *
+ * Each entry's `params.fx` matches an id in fx.js; `fxAmount` and `fxScale`
+ * are the same controls the Effects tab exposes, so loading a stock and then
+ * dialling it back is lossless.
+ */
+export const EFFECT_PRESETS = [
+  {
+    family: 'lab',
+    id: 'xerox',
+    name: 'XEROX',
+    sub: 'Copier · two-tone',
+    key: '',
+    thumb: 'contrast(2.6) brightness(1.06) grayscale(1)',
+    params: {
+      exposure: 0.06, contrast: 18, highlights: -6, shadows: 10, whites: 14, blacks: -16,
+      clarity: 30, glow: 0, fade: 0, grain: 18, grainSize: 1.4, vignette: -14,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'xerox', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'hardlight',
+    name: 'HARD LIGHT',
+    sub: 'Threshold · blown',
+    key: '',
+    thumb: 'contrast(3) brightness(1.14) grayscale(1)',
+    params: {
+      exposure: 0.1, contrast: 16, highlights: 14, shadows: 12, whites: 18, blacks: -18,
+      clarity: 24, glow: 0, fade: 0, grain: 10, grainSize: 1.2, vignette: 0,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'threshold', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'torn',
+    name: 'TORN EDGE',
+    sub: 'Soft threshold',
+    key: '',
+    thumb: 'contrast(2.2) brightness(1.05) grayscale(1)',
+    params: {
+      exposure: 0.06, contrast: 14, highlights: 4, shadows: 8, whites: 10, blacks: -14,
+      clarity: 20, glow: 8, fade: 0, grain: 34, grainSize: 2.2, vignette: -8,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'thresholdSoft', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'newsprint',
+    name: 'NEWSPRINT',
+    sub: 'Halftone · 45°',
+    key: '',
+    thumb: 'contrast(2) brightness(1.04) grayscale(1)',
+    params: {
+      exposure: 0.04, contrast: 14, highlights: -2, shadows: 8, whites: 10, blacks: -12,
+      clarity: 18, glow: 0, fade: 0, grain: 12, grainSize: 1.2, vignette: -10,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'halftone', fxAmount: 100, fxScale: 110, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'onedbit',
+    name: '1-BIT',
+    sub: 'Ordered dither',
+    key: '',
+    thumb: 'contrast(2.4) brightness(1.06) grayscale(1)',
+    params: {
+      exposure: 0.04, contrast: 12, highlights: 2, shadows: 6, whites: 10, blacks: -12,
+      clarity: 26, glow: 0, fade: 0, grain: 0, grainSize: 1.2, vignette: -8,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'dither', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'fax',
+    name: 'FAX',
+    sub: 'Line screen',
+    key: '',
+    thumb: 'contrast(2.2) brightness(1.05) grayscale(1)',
+    params: {
+      exposure: 0.04, contrast: 16, highlights: 2, shadows: 6, whites: 10, blacks: -14,
+      clarity: 22, glow: 0, fade: 0, grain: 8, grainSize: 1.2, vignette: -6,
+      tone: 'cool', toneStrength: 8, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'scanline', fxAmount: 100, fxScale: 90, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'riso',
+    name: 'RISO',
+    sub: 'Misregistered',
+    key: '',
+    thumb: 'contrast(1.8) brightness(1.04) grayscale(1)',
+    params: {
+      exposure: 0.02, contrast: 12, highlights: 4, shadows: 8, whites: 8, blacks: -10,
+      clarity: 16, glow: 10, fade: 6, grain: 22, grainSize: 1.8, vignette: -8,
+      tone: 'cool', toneStrength: 16, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'riso', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'decayed',
+    name: 'DECAYED',
+    sub: 'Scratched print',
+    key: '',
+    thumb: 'contrast(1.9) brightness(0.98) grayscale(1)',
+    params: {
+      exposure: -0.02, contrast: 16, highlights: -6, shadows: 2, whites: 8, blacks: -14,
+      clarity: 22, glow: 6, fade: 10, grain: 44, grainSize: 2.6, vignette: -26,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'distress', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'burnt',
+    name: 'BURNT',
+    sub: 'Blown centre',
+    key: '',
+    thumb: 'contrast(2.1) brightness(1.1) grayscale(1)',
+    params: {
+      exposure: 0.08, contrast: 14, highlights: 12, shadows: -4, whites: 16, blacks: -16,
+      clarity: 18, glow: 18, fade: 0, grain: 26, grainSize: 2, vignette: -34,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'filmBurn', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'weave',
+    name: 'WEAVE',
+    sub: 'Crossed lines',
+    key: '',
+    thumb: 'contrast(2.1) brightness(1.02) grayscale(1)',
+    params: {
+      exposure: 0.02, contrast: 14, highlights: 2, shadows: 8, whites: 8, blacks: -12,
+      clarity: 20, glow: 0, fade: 0, grain: 10, grainSize: 1.2, vignette: -8,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'crosshatch', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'duotone',
+    name: 'DUOTONE',
+    sub: 'Diffusion · cool',
+    key: '',
+    thumb: 'contrast(1.7) brightness(1.02) grayscale(1)',
+    params: {
+      exposure: 0.02, contrast: 10, highlights: 2, shadows: 8, whites: 8, blacks: -10,
+      clarity: 14, glow: 12, fade: 8, grain: 20, grainSize: 1.8, vignette: -10,
+      tone: 'cyan', toneStrength: 22, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'errorDiffuse', fxAmount: 100, fxScale: 100, fxLevel: 50,
+    },
+  },
+  {
+    family: 'lab',
+    id: 'poster',
+    name: 'POSTER',
+    sub: 'Three-plate',
+    key: '',
+    thumb: 'contrast(2) brightness(1.04) grayscale(1)',
+    params: {
+      exposure: 0.04, contrast: 16, highlights: 6, shadows: 6, whites: 12, blacks: -14,
+      clarity: 26, glow: 0, fade: 0, grain: 16, grainSize: 1.6, vignette: -12,
+      tone: 'neutral', toneStrength: 0, mixR: 0.32, mixG: 0.56, mixB: 0.12,
+      fx: 'ditherFine', fxAmount: 100, fxScale: 120, fxLevel: 50,
+    },
+  },
+];
+
+/** Everything the rail lists: darkroom stocks first, then the graphic lab. */
+export const ALL_PRESETS = [...PRESETS, ...EFFECT_PRESETS];
+
+export const PRESET_BY_ID = Object.fromEntries(ALL_PRESETS.map((p) => [p.id, p]));
+
+/** Which family a stock belongs to. */
+export function familyOf(id) {
+  return EFFECT_PRESETS.some((p) => p.id === id) ? 'lab' : 'darkroom';
+}
 
 /** Merge a preset's params over the defaults. */
 export function paramsFor(id) {
