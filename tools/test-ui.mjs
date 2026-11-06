@@ -517,6 +517,144 @@ check('dragging a handle changes the crop', (() => {
 cropBtn.click();
 await wait(200);
 check('crop mode closes', cropBtn.getAttribute('aria-pressed') === 'false');
+
+/* ------------------------------------------------------------------ */
+/* Crop overlay geometry                                               */
+/* ------------------------------------------------------------------ */
+
+// The user reported the frame only appearing after dragging from a corner,
+// and not following the aspect lock. These checks pin the behaviour down:
+// the frame must be visible immediately, must track the print, and must
+// change size when the aspect changes without any pointer input.
+
+console.log('\ncrop overlay:');
+
+const geo = moduleCache.get('js/geometry.js').exports;
+
+// 1. The frame has real geometry the moment crop mode opens.
+document.querySelector('#cropBtn').click();
+await wait(260);
+const frameEl = document.querySelector('.crop-frame');
+check('crop frame exists on open', !!frameEl);
+const boxOnOpen = frameEl.getBoundingClientRect ? null : frameEl.style;
+check('crop frame is placed immediately, not after a drag',
+  (frameEl.style.width !== '' && parseFloat(frameEl.style.width) > 0 &&
+   frameEl.style.height !== '' && parseFloat(frameEl.style.height) > 0),
+  `w=${frameEl.style.width} h=${frameEl.style.height} left=${frameEl.style.left}`);
+// The frame must be the stored crop's footprint, not the whole print: the
+// preview shows everything, and the frame marks what survives.
+check('crop frame matches the stored crop footprint',
+  (() => {
+    const f = app.state.params.frame;
+    const r = geo.cropToPrintRect(f.crop, { ...f, crop: { x: 0, y: 0, w: 1, h: 1 } });
+    return Math.abs(parseFloat(frameEl.style.width) - r.w * 560) < 2 &&
+           Math.abs(parseFloat(frameEl.style.height) - r.h * 700) < 2;
+  })(),
+  `${frameEl.style.width} × ${frameEl.style.height} for crop ${JSON.stringify(app.state.params.frame.crop)}`);
+check('crop frame sits on the print, not in the stage corner',
+  Math.abs(parseFloat(frameEl.style.left) - 0) < 1.5 &&
+  Math.abs(parseFloat(frameEl.style.top) - 0) < 1.5,
+  `left=${frameEl.style.left} top=${frameEl.style.top}`);
+
+// 2. The whole negative is shown while cropping, so the window can grow.
+//    Whatever the crop was, crop mode must drop it for the preview.
+const cropAtEntry = { ...app.state.params.frame.crop };
+// Entering with a crop applied is the case that used to break: the stage must
+// show the WHOLE negative, so the window can be pulled outwards again.
+// The decisive proof that crop mode is not stretching: the print box must be
+// the negative's shape, not the cropped surface's. A cropped surface blitted
+// into a negative-shaped box is the stretch that was reported.
+const negativeRatio = app.engine.negative.width / app.engine.negative.height;
+const viewRatio = 560 / 700;
+check('crop mode shows the full negative, not the cropped print',
+  app.state.cropMode === true &&
+  cropAtEntry.w < 1 &&
+  Math.abs(viewRatio - negativeRatio) < 0.02,
+  `crop at entry ${JSON.stringify(cropAtEntry)}; view ${viewRatio.toFixed(3)} vs negative ${negativeRatio.toFixed(3)}`);
+
+// 3. Changing the aspect reshapes the frame with no pointer input.
+const aspectInTransform = openTabFor('.group[data-group="transform"] .panel-select');
+const cropAspectSelect = aspectInTransform || document.querySelector('.panel-select');
+check('aspect control is reachable', !!cropAspectSelect,
+  cropAspectSelect ? cropAspectSelect.value : 'not found');
+
+// Start from a deliberately non-square window so the ratio change is visible.
+cropAspectSelect.value = '4:5';
+cropAspectSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+await wait(300);
+const frameBeforeAspect = { w: parseFloat(frameEl.style.width), h: parseFloat(frameEl.style.height) };
+
+cropAspectSelect.value = '1:1';
+cropAspectSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+await wait(300);
+
+const frameAfterAspect = { w: parseFloat(frameEl.style.width), h: parseFloat(frameEl.style.height) };
+check('changing aspect resizes the crop frame immediately',
+  Math.abs(frameAfterAspect.w - frameBeforeAspect.w) > 1 ||
+  Math.abs(frameAfterAspect.h - frameBeforeAspect.h) > 1,
+  `${frameBeforeAspect.w.toFixed(1)}×${frameBeforeAspect.h.toFixed(1)} → ` +
+  `${frameAfterAspect.w.toFixed(1)}×${frameAfterAspect.h.toFixed(1)}`);
+check('the 1:1 frame on screen is actually square',
+  Math.abs(frameAfterAspect.w - frameAfterAspect.h) < 1.5,
+  `${frameAfterAspect.w.toFixed(1)} × ${frameAfterAspect.h.toFixed(1)}`);
+
+// 4. The stored crop describes a square in *print* pixels.
+check('stored crop matches the square on screen', (() => {
+  const f = app.state.params.frame;
+  const rect = geo.cropToPrintRect(f.crop, { ...f, crop: { x: 0, y: 0, w: 1, h: 1 } });
+  const size = geo.frameSize({ ...f, crop: { x: 0, y: 0, w: 1, h: 1 } }, app.engine.negative);
+  const px = rect.w * size.width;
+  const py = rect.h * size.height;
+  return Math.abs(px - py) < 2;
+})(), JSON.stringify(app.state.params.frame.crop));
+
+// 5. Dragging a corner keeps the aspect lock.
+const seHandle = document.querySelector('.crop-handle-se');
+const beforeDrag = { ...app.state.params.frame.crop };
+// Grab the handle where it actually is: the se corner of the frame.
+const seX = parseFloat(frameEl.style.left) + parseFloat(frameEl.style.width);
+const seY = parseFloat(frameEl.style.top) + parseFloat(frameEl.style.height);
+seHandle.dispatchEvent(cropEvent('pointerdown', seX, seY));
+cropLayer.dispatchEvent(cropEvent('pointermove', seX - 170, seY - 210));
+cropLayer.dispatchEvent(cropEvent('pointerup', seX - 170, seY - 210));
+await wait(300);
+
+check('dragging with a lock shrinks the crop', (() => {
+  const f = app.state.params.frame;
+  return f.crop.w < beforeDrag.w - 0.01;
+})(), `${beforeDrag.w.toFixed(3)} → ${app.state.params.frame.crop.w.toFixed(3)}`);
+
+check('dragging a corner keeps the aspect square', (() => {
+  const f = app.state.params.frame;
+  const rect = geo.cropToPrintRect(f.crop, { ...f, crop: { x: 0, y: 0, w: 1, h: 1 } });
+  const size = geo.frameSize({ ...f, crop: { x: 0, y: 0, w: 1, h: 1 } }, app.engine.negative);
+  return Math.abs(rect.w * size.width - rect.h * size.height) < 3;
+})(), JSON.stringify(app.state.params.frame.crop));
+
+// 6. The frame never leaves the print.
+check('crop frame stays inside the print', (() => {
+  const f = app.state.params.frame;
+  const r = geo.cropToPrintRect(f.crop, f);
+  return r.x >= -1e-6 && r.y >= -1e-6 && r.x + r.w <= 1 + 1e-6 && r.y + r.h <= 1 + 1e-6;
+})(), JSON.stringify(geo.cropToPrintRect(app.state.params.frame.crop, { ...app.state.params.frame, crop: { x: 0, y: 0, w: 1, h: 1 } })));
+
+// 7. Escape restores the crop the tool opened with.
+// What the tool opened with is what Escape must restore.
+const beforeEscape = { ...cropAtEntry };
+cropAspectSelect.value = '16:9';
+cropAspectSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+await wait(280);
+const afterWide = { ...app.state.params.frame.crop };
+check('16:9 changed the crop', Math.abs(afterWide.w - beforeEscape.w) > 0.01 || Math.abs(afterWide.h - beforeEscape.h) > 0.01,
+  JSON.stringify(afterWide));
+
+window.dispatchEvent(Object.assign(new window.Event('keydown', { bubbles: true, cancelable: true }), { key: 'Escape' }));
+await wait(260);
+check('Escape cancels the crop back to where it opened',
+  Math.abs(app.state.params.frame.crop.w - beforeEscape.w) < 1e-6 &&
+  Math.abs(app.state.params.frame.crop.h - beforeEscape.h) < 1e-6,
+  `${JSON.stringify(afterWide)} → ${JSON.stringify(app.state.params.frame.crop)}`);
+check('Escape leaves crop mode', document.querySelector('#cropLayer').hidden === true);
 check('crop overlay hides', document.querySelector('#cropLayer').hidden === true);
 
 // Rotation
