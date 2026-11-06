@@ -270,6 +270,7 @@ js/batch.js           batch runner and a dependency-free ZIP writer
 js/app.js             state, history, view, brush, export, keyboard
 tools/test-engine.mjs headless checks: pipeline, curve, mask, ZIP
 tools/test-profile.mjs the profile editor's compose and validation rules
+tools/render-profile.mjs draws the templates to a PNG for review
 tools/test-ui.mjs     boots the real UI in jsdom and drives the user journeys
 tools/test-deploy.mjs verifies the Pages build is self-contained
 ```
@@ -314,6 +315,10 @@ npm run build && node tools/test-deploy.mjs
 
 `test-engine.mjs` also writes `tools/out/preset-sheet.png` and a full-resolution
 export, so visual regressions are easy to spot.
+
+`node tools/render-profile.mjs` writes `tools/out/profile-templates.png` — a
+headless render of the four profile templates drawn with `@napi-rs/canvas`. It
+proves the composed text and the colours; it is not a screenshot of the app.
 
 `test-ui.mjs` runs in jsdom, which has no layout engine: it cannot evaluate a
 media query. The phone *layout* is therefore checked by asserting the
