@@ -426,12 +426,73 @@ const mirrored = developFrame(mirrorFrame);
 check('mirror renders a full frame', edgeCoverage(mirrored.x) <= EDGE_TOLERANCE,
   `${edgeCoverage(mirrored.x)} px`);
 
-const leftAfterMirror = developFrame(
-  { ...mirrorFrame, crop: { x: 0, y: 0, w: 0.45, h: 1 } }
-);
-check('mirroring swaps which side is dark',
-  leftAfterMirror.s.mean > brightHalf.s.mean + 4,
-  `left-unmirrored=${brightHalf.s.mean.toFixed(0)} left-mirrored=${leftAfterMirror.s.mean.toFixed(0)}`);
+// Mirroring flips the print about the CROP. Comparing column means inside
+// one narrow band is the discriminating test: an overall mean barely moves
+// because the band is fairly flat, but its left and right edges must swap.
+function columnMean(frame, px) {
+  const c = createCanvas(W, H);
+  const x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  const params = { ...paramsFor('noir'), frame, grain: 0 };
+  const eng = new Darkroom();
+  eng.load(img, NW, NH, frame);
+  eng.develop(x, W, H, params);
+  const d = x.getImageData(0, 0, W, H).data;
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < H; y++) { sum += d[(y * W + px) * 4]; n++; }
+  return sum / n;
+}
+
+const bandFrame = { ...geo.FRAME_DEFAULTS, crop: { x: 0, y: 0, w: 0.45, h: 1 } };
+const mirroredBandFrame = { ...bandFrame, flipH: true };
+const plainLeft = columnMean(bandFrame, 6);
+const plainRight = columnMean(bandFrame, W - 7);
+const flipLeft = columnMean(mirroredBandFrame, 6);
+const flipRight = columnMean(mirroredBandFrame, W - 7);
+
+check('mirroring swaps the edges of the crop',
+  Math.abs(flipLeft - plainRight) < 6 && Math.abs(flipRight - plainLeft) < 6
+  && Math.abs(plainLeft - plainRight) > 3,
+  `plain ${plainLeft.toFixed(0)}/${plainRight.toFixed(0)} → flip ${flipLeft.toFixed(0)}/${flipRight.toFixed(0)}`);
+
+/**
+ * The preview draws from a pre-framed surface, the export draws from the
+ * original. They must agree pixel-for-pixel on the same frame — this is the
+ * regression guard for the double-transform bug.
+ */
+function previewVsExport(frame) {
+  const eng = new Darkroom();
+  eng.load(img, NW, NH, frame);
+  const params = { ...paramsFor('noir'), frame, grain: 0 };
+  const a = createCanvas(W, H);
+  const b = createCanvas(W, H);
+  const ax = a.getContext('2d');
+  const bx = b.getContext('2d');
+  ax.imageSmoothingQuality = 'high';
+  bx.imageSmoothingQuality = 'high';
+  eng.develop(ax, W, H, params);                       // preview path
+  eng.develop(bx, W, H, params, { source: eng.source }); // export path
+  const da = ax.getImageData(0, 0, W, H).data;
+  const db = bx.getImageData(0, 0, W, H).data;
+  let diff = 0;
+  for (let i = 0; i < da.length; i += 4) diff += Math.abs(da[i] - db[i]);
+  return diff / (W * H);
+}
+
+for (const [name, frame] of [
+  ['no transform', geo.FRAME_DEFAULTS],
+  ['mirror H', { ...geo.FRAME_DEFAULTS, flipH: true }],
+  ['mirror V', { ...geo.FRAME_DEFAULTS, flipV: true }],
+  ['rotate 90', { ...geo.FRAME_DEFAULTS, rotation: 1 }],
+  ['rotate 270', { ...geo.FRAME_DEFAULTS, rotation: 3 }],
+  ['crop', { ...geo.FRAME_DEFAULTS, crop: { x: 0.2, y: 0.15, w: 0.5, h: 0.6 } }],
+  ['crop + mirror', { ...geo.FRAME_DEFAULTS, crop: { x: 0.2, y: 0.15, w: 0.5, h: 0.6 }, flipH: true }],
+  ['rotate + mirror', { ...geo.FRAME_DEFAULTS, rotation: 1, flipH: true }],
+]) {
+  const d = previewVsExport(frame);
+  check(`  preview matches export: ${name}`, d < 3, `mean delta ${d.toFixed(2)}`);
+}
 
 // 7. Aspect fitting keeps the window inside the frame and lands on ratio.
 for (const id of ['1:1', '3:2', '16:9']) {

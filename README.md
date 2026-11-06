@@ -47,6 +47,13 @@ Pick one and keep adjusting — nothing is baked in.
 | CYANOTYPE | Prussian-blue print, flat and dreamy |
 | CARBON | Hard structural contrast, cool cast |
 
+### Themes
+
+A **light** and **dark** theme, toggle with <kbd>T</kbd> or the icon in the
+top bar. The choice is remembered, and the app follows your OS setting until
+you pick one. The print itself is never tinted — both themes keep it on a
+neutral mat so you are judging the photograph, not the UI.
+
 ### Crop & transform
 
 - **Crop** — drag the frame or any of its eight handles, with rule-of-thirds
@@ -62,6 +69,10 @@ Geometry is applied before any development, so grain, toning and the dodge/burn
 mask all follow the print — and the exported file is the crop, not the negative.
 
 ### Adjustments
+
+The panel is split into four tabs — **Crop**, **Tone**, **Detail** and
+**Print** — so related controls sit together instead of competing for one
+long scroll.
 
 - **Tone** — exposure (EV), contrast, highlights, shadows, whites, blacks
 - **Manual curve** — drag control points to reshape the print; click to add a
@@ -92,6 +103,7 @@ either as individual downloads or as a single ZIP — written by hand in
 - <kbd>⌘/Ctrl</kbd> + scroll or <kbd>+</kbd> / <kbd>−</kbd> to zoom; drag to pan
 - <kbd>⌘/Ctrl Z</kbd> / <kbd>⇧⌘Z</kbd> for undo and redo
 - <kbd>1</kbd>–<kbd>9</kbd> jump between stocks, <kbd>←</kbd> <kbd>→</kbd> step through all twelve
+- <kbd>T</kbd> switches light / dark theme
 - <kbd>C</kbd> opens the crop frame, <kbd>M</kbd> mirrors, <kbd>Shift [</kbd> / <kbd>Shift ]</kbd> rotate 90°
 - <kbd>B</kbd> toggles the brush, <kbd>[</kbd> / <kbd>]</kbd> change its size, <kbd>Alt</kbd> erases
 - <kbd>Shift B</kbd> opens batch develop
@@ -164,11 +176,11 @@ npm test                        # engine + UI suites
 npm run build && node tools/test-deploy.mjs
 ```
 
-- `test-engine.mjs` — 66 checks: tonal math, grain, toning, export, the monotone
+- `test-engine.mjs` — 71 checks: tonal math, grain, toning, export, the monotone
   curve (including a monotonicity sweep), the dodge/burn mask, and the ZIP writer
-- `test-ui.mjs` — 83 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 99 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
-  reset, keyboard
+  panel tabs, light/dark theme, reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 

@@ -25,6 +25,7 @@ const SAMPLES = [
 ];
 
 const STORAGE_KEY = 'noir.preset';
+const THEME_KEY = 'noir.theme';
 
 /* ------------------------------------------------------------------ */
 /* State                                                               */
@@ -94,6 +95,12 @@ let panel = buildPanel(panelBody, {
     if (id === 'aspect') {
       applyAspect(value);
       if (commit) pushHistory();
+      return;
+    }
+
+    // Mirror toggles live on the frame.
+    if (id === 'flipH' || id === 'flipV') {
+      toggleMirror(id);
       return;
     }
 
@@ -180,6 +187,7 @@ function resetAll() {
   state.aspect = 'free';
   if (state.cropMode) toggleCropMode(false);
   engine.refreshSurface(state.params.frame);
+  syncFrameControls();
   updateFrameReadout();
   state.brush = false;
   panel.sync(state.params);
@@ -187,6 +195,48 @@ function resetAll() {
   scheduleRender({ histogram: true });
   pushHistory();
   toast('Adjustments reset');
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme                                                               */
+/* ------------------------------------------------------------------ */
+
+const THEMES = ['dark', 'light'];
+
+function resolveTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(THEME_KEY);
+  } catch { /* private mode */ }
+  if (saved && THEMES.includes(saved)) return saved;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+    ? 'light'
+    : 'dark';
+}
+
+function applyTheme(theme, { persist = true } = {}) {
+  const next = THEMES.includes(theme) ? theme : 'dark';
+  document.documentElement.dataset.theme = next;
+  const btn = $('#themeBtn');
+  if (btn) {
+    btn.setAttribute(
+      'aria-label',
+      next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
+    );
+  }
+  // The checkered plate and the canvas chrome are redrawn from CSS vars.
+  if (engine.loaded) scheduleRender({ histogram: true });
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch { /* private mode */ }
+  }
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  applyTheme(next);
+  toast(next === 'light' ? 'Light theme' : 'Dark theme', { timeout: 1200 });
 }
 
 /* ------------------------------------------------------------------ */
@@ -201,6 +251,7 @@ function applyFrame(frame, { resetMask = false, histogram = true, syncPanel = tr
   state.params.straighten = state.params.frame.straighten;
   engine.refreshSurface(state.params.frame, resetMask);
   if (syncPanel) panel.sync(state.params);
+  syncFrameControls();
   needHistogram = histogram;
   scheduleRender({ histogram });
 }
@@ -267,7 +318,27 @@ function resetFrame() {
   updateFrameReadout();
 }
 
+/**
+ * Push frame state into every control that can change it. There are three
+ * places (panel toggle, panel action, toolbar button) and they all have to
+ * agree, otherwise a button keeps looking "on" after a reset.
+ */
+function syncFrameControls() {
+  const frame = state.params.frame;
+  const flipBtn = $('#flipBtn');
+  if (flipBtn) flipBtn.setAttribute('aria-pressed', String(!!frame.flipH));
+  const flipVBtn = $('#flipVBtn');
+  if (flipVBtn) flipVBtn.setAttribute('aria-pressed', String(!!frame.flipV));
+  syncCropAction();
+  const rotateBadge = $('#rotateBadge');
+  if (rotateBadge) {
+    rotateBadge.textContent = frame.rotation ? `${frame.rotation * 90}°` : '';
+    rotateBadge.hidden = !frame.rotation;
+  }
+}
+
 function updateFrameReadout() {
+  syncFrameControls();
   if (!engine.loaded) return;
   const size = frameSize(state.params.frame, engine.negative);
   dimsEl.textContent = `${size.width} × ${size.height}`;
@@ -1212,16 +1283,14 @@ $('#zoomOut').addEventListener('click', () => zoomBy(-1));
 $('#undoBtn').addEventListener('click', undo);
 $('#redoBtn').addEventListener('click', redo);
 $('#shortcutsBtn').addEventListener('click', () => modals.openModal($('#shortcutsModal')));
+$('#themeBtn').addEventListener('click', toggleTheme);
 brushBtn.addEventListener('click', () => toggleBrush());
 eraseBtn.addEventListener('click', () => toggleErase());
 
 $('#cropBtn').addEventListener('click', () => toggleCropMode());
 $('#rotateLeftBtn').addEventListener('click', () => rotateQuarter(-1));
 $('#rotateRightBtn').addEventListener('click', () => rotateQuarter(1));
-$('#flipBtn').addEventListener('click', () => {
-  toggleMirror('flipH');
-  $('#flipBtn').setAttribute('aria-pressed', String(state.params.frame.flipH));
-});
+$('#flipBtn').addEventListener('click', () => toggleMirror('flipH'));
 
 exportFormat.addEventListener('change', updateExportPreview);
 exportSize.addEventListener('change', updateExportPreview);
@@ -1491,6 +1560,10 @@ window.addEventListener('keydown', (event) => {
   }
 
   switch (event.key) {
+    case 't': case 'T':
+      event.preventDefault();
+      toggleTheme();
+      break;
     case 'c': case 'C':
       event.preventDefault();
       toggleCropMode();
@@ -1590,6 +1663,18 @@ function boot() {
     setPresetSilently(saved);
   } else {
     setPresetSilently(state.presetId);
+  }
+
+  applyTheme(resolveTheme(), { persist: false });
+
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => {
+      let saved = null;
+      try { saved = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
+      if (!saved) applyTheme(mq.matches ? 'light' : 'dark', { persist: false });
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
   }
 
   panel.sync(state.params);
