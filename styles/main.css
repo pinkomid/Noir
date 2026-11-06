@@ -625,6 +625,30 @@ button { cursor: pointer; background: none; border: none; padding: 0; }
 .crop-handle-sw { left: 0; top: 100%; }
 .crop-handle-w  { left: 0; top: 50%; }
 
+/* Pixel readout riding on the crop frame, so the aspect you are dragging
+   reports itself where you are already looking. */
+.crop-label {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translate(-50%, -6px);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(10, 10, 11, 0.82);
+  border: 1px solid rgba(242, 238, 228, 0.22);
+  color: rgba(242, 238, 228, 0.94);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+[data-theme="light"] .crop-label {
+  background: rgba(251, 249, 244, 0.9);
+  border-color: rgba(29, 27, 24, 0.2);
+  color: rgba(29, 27, 24, 0.9);
+}
+
 .crop-layer.dragging .crop-frame { border-color: var(--accent); }
 .crop-layer.dragging .crop-handle { background: var(--accent); }
 

@@ -177,6 +177,62 @@ export function printToOriginal(u, v, frame) {
   return { x: c.x + x * c.w, y: c.y + y * c.h };
 }
 
+/**
+ * Map a point from original-image space (0…1) into print space (0…1 of the
+ * developed frame). This is the exact inverse of `printToOriginal`, and the
+ * crop overlay needs it because the crop window is stored against the
+ * negative while the user drags it on the print.
+ */
+export function originalToPrint(u, v, frame) {
+  const c = frame.crop || FRAME_DEFAULTS.crop;
+  let x = (u - c.x) / (c.w || 1);
+  let y = (v - c.y) / (c.h || 1);
+
+  if (frame.flipH) x = 1 - x;
+  if (frame.flipV) y = 1 - y;
+
+  // Re-apply the quarter turns that printToOriginal undid.
+  const rot = ((frame.rotation % 4) + 4) % 4;
+  for (let i = 0; i < rot; i++) {
+    const nx = y;
+    const ny = 1 - x;
+    x = nx;
+    y = ny;
+  }
+  return { x, y };
+}
+
+/**
+ * The crop window as a rectangle in print space. Quarter turns and mirrors
+ * map corners to corners, so an axis-aligned crop stays axis-aligned; only
+ * the ordering of the corners changes. Orientation is ignored deliberately:
+ * straightening tilts the photograph inside the rectangle, it does not tilt
+ * the rectangle.
+ */
+export function cropToPrintRect(crop, frame) {
+  const c = crop || FRAME_DEFAULTS.crop;
+  const a = originalToPrint(c.x, c.y, frame);
+  const b = originalToPrint(c.x + c.w, c.y + c.h, frame);
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
+  };
+}
+
+/** Inverse of `cropToPrintRect`: print-space rectangle → crop window. */
+export function printRectToCrop(rect, frame) {
+  const a = printToOriginal(rect.x, rect.y, frame);
+  const b = printToOriginal(rect.x + rect.w, rect.y + rect.h, frame);
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
+  };
+}
+
 /** Centre-crop a window to an aspect ratio, keeping it inside the frame. */
 export function fitCropToAspect(crop, ratio, negative) {
   if (!ratio) return crop;

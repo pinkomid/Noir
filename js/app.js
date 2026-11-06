@@ -10,6 +10,7 @@ import { BatchJob } from './batch.js';
 import {
   FRAME_DEFAULTS, ASPECTS, aspectRatio, frameSize,
   fitCropToAspect, isNeutralFrame, cloneFrame,
+  cropToPrintRect, printRectToCrop,
 } from './geometry.js';
 import { PRESETS, PRESET_BY_ID, paramsFor } from './presets.js';
 import { DEFAULTS as CONTROL_DEFAULTS, CURVE_POINTS, ALL_CONTROLS } from './controls.js';
@@ -89,6 +90,7 @@ let panel = buildPanel(panelBody, {
       state.params.frame.straighten = Number(value);
       applyFrame(state.params.frame, { syncPanel: false });
       updateFrameReadout();
+      repaintCrop();
       if (commit) pushHistory();
       return;
     }
@@ -285,6 +287,7 @@ function rotateQuarter(direction) {
   if (state.aspect !== 'free') applyAspect(state.aspect, { silent: true });
   commitFrame(frame, { resetMask: true });
   updateFrameReadout();
+  repaintCrop();
 }
 
 function toggleMirror(axis) {
@@ -293,6 +296,7 @@ function toggleMirror(axis) {
   frame[axis] = !frame[axis];
   commitFrame(frame, { resetMask: true });
   updateFrameReadout();
+  repaintCrop();
 }
 
 function applyAspect(aspectId, { silent = false } = {}) {
@@ -308,6 +312,9 @@ function applyAspect(aspectId, { silent = false } = {}) {
   }
   applyFrame(frame);
   updateFrameReadout();
+  // The lock reshapes the window; the overlay has to show it straight away
+  // rather than waiting for the next pointer move.
+  repaintCrop();
   if (!silent && ratio) toast(`Aspect ${aspectId === 'orig' ? 'original' : aspectId}`, { timeout: 1400 });
 }
 
@@ -476,8 +483,15 @@ function layoutView() {
 
   const fit = fitScale();
   const factor = state.view.zoom === 'fit' ? 1 : state.view.zoom;
-  const cssW = Math.max(24, Math.round(engine.surfaceW * fit * factor));
-  const cssH = Math.max(24, Math.round(engine.surfaceH * fit * factor));
+  // Cropping shows the whole negative, so the print box is the frame's full
+  // extent rather than the current crop.
+  const box = state.cropMode
+    ? frameSize({ ...state.params.frame, crop: { x: 0, y: 0, w: 1, h: 1 } }, engine.negative)
+    : null;
+  const srcW = box ? box.width : engine.surfaceW;
+  const srcH = box ? box.height : engine.surfaceH;
+  const cssW = Math.max(24, Math.round(srcW * fit * factor));
+  const cssH = Math.max(24, Math.round(srcH * fit * factor));
 
   view.style.width = `${cssW}px`;
   view.style.height = `${cssH}px`;
@@ -518,6 +532,13 @@ function render() {
     vctx.clearRect(0, 0, w, h);
     vctx.imageSmoothingQuality = 'high';
     vctx.drawImage(engine.surface, 0, 0, w, h);
+  } else if (state.cropMode) {
+    // Cropping needs the whole photograph, not the already-cropped print:
+    // you cannot pull the window outwards if everything outside it has been
+    // thrown away. Developing from the ORIGINAL negative with a full-frame
+    // crop is what makes that possible — blitting the cropped surface into a
+    // larger box would just stretch it, which is precisely the bug reported.
+    engine.develop(vctx, w, h, cropPreviewParams(), { source: engine.source });
   } else {
     engine.develop(vctx, w, h, state.params);
   }
@@ -526,6 +547,21 @@ function render() {
     needHistogram = false;
     drawHistogram(histogramCanvas, engine.histogram(state.params), state.params);
   }
+
+  // The overlay is positioned in stage coordinates, so it has to follow every
+  // relayout — otherwise it drifts away from the print.
+  if (state.cropMode) repaintCrop();
+}
+
+/** Parameters for the crop-mode preview: same look, no crop applied. */
+function cropPreviewParams() {
+  return {
+    ...state.params,
+    // The mask is painted against the print, so it cannot be aligned to a
+    // full-frame view; leaving it out keeps the preview honest.
+    maskAmount: 0,
+    frame: { ...state.params.frame, crop: { x: 0, y: 0, w: 1, h: 1 } },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -784,6 +820,9 @@ function toggleCropMode(force) {
   }
   state.cropMode = force === undefined ? !state.cropMode : !!force;
   if (state.cropMode) {
+    // Remembered so Escape can back out of a drag that was already applied
+    // to the live preview.
+    cropEntry = cloneFrame(state.params.frame).crop;
     // Painting and cropping compete for the pointer; brush wins only when
     // explicitly requested, so leave it here.
     if (state.brush) { state.brush = false; updateBrushUi(); }
@@ -791,13 +830,34 @@ function toggleCropMode(force) {
     stageFrame.classList.add('cropping');
     setStatus('Crop · drag the frame, then press Enter to apply or Esc to cancel');
     buildCropHandles();
+    // Build the chrome, then immediately place it. Without this the frame
+    // sits at zero size in the stage corner until the first pointer move.
+    scheduleRender();
+    requestAnimationFrame(repaintCrop);
   } else {
+    cropEntry = null;
     cropLayer.hidden = true;
     cropLayer.innerHTML = '';
     stageFrame.classList.remove('cropping');
     setStatus('Ready');
+    // Leaving crop mode returns the view to the cropped print.
+    scheduleRender();
   }
   updateCropButton();
+}
+
+let cropEntry = null;
+
+/** Escape: put the crop window back to where it was when the tool opened. */
+function cancelCrop() {
+  const restore = cropEntry;
+  toggleCropMode(false);
+  if (!restore) return;
+  const frame = state.params.frame;
+  frame.crop = restore;
+  applyFrame(frame);
+  updateFrameReadout();
+  toast('Crop cancelled', { timeout: 1400 });
 }
 
 function updateCropButton() {
@@ -835,6 +895,7 @@ function buildCropHandles() {
 
   const frame = el('div', { class: 'crop-frame' }, [
     el('div', { class: 'crop-thirds', 'aria-hidden': 'true' }),
+    el('div', { class: 'crop-label', 'aria-hidden': 'true' }),
   ]);
 
   for (const h of CROP_HANDLES) {
@@ -858,19 +919,142 @@ function buildCropHandles() {
 
 let cropDrag = null;
 
+/**
+ * The pixel rectangle of the print inside the stage. Everything in the crop
+ * overlay is expressed relative to this, so the frame and the photograph
+ * cannot drift apart.
+ */
+function printRect() {
+  const stageRect = stageFrame.getBoundingClientRect();
+  const viewRect = view.getBoundingClientRect();
+  return {
+    stage: stageRect,
+    left: viewRect.left - stageRect.left,
+    top: viewRect.top - stageRect.top,
+    width: viewRect.width,
+    height: viewRect.height,
+  };
+}
+
+/**
+ * The frame with only its orientation kept (turn + mirrors + straighten).
+ * In crop mode the print on screen is the WHOLE negative, so rectangles are
+ * mapped through orientation alone. Mapping through the crop as well would
+ * divide the window by itself and pin it to the full frame — which is
+ * exactly why the frame used to sit outside the photograph.
+ */
+function orientationOnly(frame) {
+  return { ...frame, crop: { x: 0, y: 0, w: 1, h: 1 } };
+}
+
+/** The crop window, as a rectangle of the photograph shown in crop mode. */
+function currentPrintCrop() {
+  return cropToPrintRect(state.params.frame.crop, orientationOnly(state.params.frame));
+}
+
+/**
+ * Resize the crop window inside the print. `rect` is in print space, where
+ * the long edge may be pinned by an aspect lock.
+ *
+ * The lock is enforced by deriving the missing dimension from the one the
+ * pointer actually moved, anchored on the opposite corner, then clamping the
+ * whole rectangle back inside the print. Returning a rectangle that still
+ * satisfies the ratio matters: the caller re-derives both the crop and the
+ * print size from it.
+ */
+function resizePrintRect(rect, mode, dx, dy, ratio, printRatio) {
+  const min = 0.04;
+  let { x, y, w, h } = rect;
+
+  if (mode === 'move') {
+    return {
+      x: Math.min(1 - w, Math.max(0, x + dx)),
+      y: Math.min(1 - h, Math.max(0, y + dy)),
+      w,
+      h,
+    };
+  }
+
+  const west = mode.includes('w');
+  const east = mode.includes('e');
+  const north = mode.includes('n');
+  const south = mode.includes('s');
+
+  // Grow or shrink along each axis the pointer is actively dragging.
+  if (west) {
+    const nx = Math.min(x + w - min, Math.max(0, x + dx));
+    w = x + w - nx;
+    x = nx;
+  }
+  if (east) {
+    w = Math.min(1 - x, Math.max(min, w + dx));
+  }
+  if (north) {
+    const ny = Math.min(y + h - min, Math.max(0, y + dy));
+    h = y + h - ny;
+    y = ny;
+  }
+  if (south) {
+    h = Math.min(1 - y, Math.max(min, h + dy));
+  }
+
+  if (ratio) {
+    // The ratio is in PIXELS, while w and h here are fractions of a print
+    // that is not square. Converting once, up front, keeps the rest of the
+    // maths independent of the photograph's proportions — getting this wrong
+    // produced a square in unit space, which is not a square on screen.
+    const unit = ratio / (printRatio || 1);
+    const horizontalOnly = west || east;
+    const verticalOnly = north || south;
+
+    if (horizontalOnly && !verticalOnly) {
+      const nh = w / unit;
+      if (north) { y = y + h - nh; h = nh; }
+      else if (south) { h = nh; }
+      else { const cy = y + h / 2; h = nh; y = cy - nh / 2; }
+    } else if (verticalOnly && !horizontalOnly) {
+      const nw = h * unit;
+      if (west) { x = x + w - nw; w = nw; }
+      else if (east) { w = nw; }
+      else { const cx = x + w / 2; w = nw; x = cx - nw / 2; }
+    } else {
+      // Corner: keep the corner opposite the dragged one fixed.
+      const nw = Math.max(min, w);
+      const nh = nw / unit;
+      if (north) y = y + h - nh;
+      h = nh;
+      w = nw;
+      if (west) x = x + rect.w - nw;
+    }
+  }
+
+  // Clamp inside the print without breaking the ratio.
+  if (ratio) {
+    const unit = ratio / (printRatio || 1);
+    if (w > 1) { w = 1; h = w / unit; }
+    if (h > 1) { h = 1; w = h * unit; }
+  }
+  x = Math.max(0, Math.min(1 - w, x));
+  y = Math.max(0, Math.min(1 - h, y));
+  return { x, y, w, h };
+}
+
 function startCropDrag(event, mode) {
   if (!engine.loaded) return;
   event.preventDefault();
   event.stopPropagation();
 
-  const rect = view.getBoundingClientRect();
+  const box = printRect();
   cropDrag = {
     mode,
     startX: event.clientX,
     startY: event.clientY,
-    rect,
-    crop: { ...state.params.frame.crop },
+    box,
+    // Work in print space: the overlay lives on the print, while the stored
+    // crop is expressed against the negative.
+    rect: currentPrintCrop(),
     ratio: aspectRatio(state.aspect, engine.negative),
+    printRatio: box.width / Math.max(1, box.height),
   };
   cropLayer.setPointerCapture(event.pointerId);
   cropLayer.classList.add('dragging');
@@ -878,58 +1062,15 @@ function startCropDrag(event, mode) {
 
 cropLayer.addEventListener('pointermove', (event) => {
   if (!cropDrag) return;
-  const { rect, crop, mode, ratio } = cropDrag;
-  if (!rect.width || !rect.height) return;
+  const { box, rect, mode, ratio, printRatio } = cropDrag;
+  if (!box.width || !box.height) return;
 
-  const dx = (event.clientX - cropDrag.startX) / rect.width;
-  const dy = (event.clientY - cropDrag.startY) / rect.height;
+  const dx = (event.clientX - cropDrag.startX) / box.width;
+  const dy = (event.clientY - cropDrag.startY) / box.height;
 
-  let { x, y, w, h } = crop;
-  // Translation happens in original-image space, so account for the crop size.
-  const stepX = dx;
-  const stepY = dy;
-
-  if (mode === 'move') {
-    x = Math.min(1 - w, Math.max(0, crop.x + stepX));
-    y = Math.min(1 - h, Math.max(0, crop.y + stepY));
-  } else {
-    const min = 0.06;
-    if (mode.includes('w')) {
-      const nx = Math.min(crop.x + crop.w - min, Math.max(0, crop.x + stepX));
-      w = crop.x + crop.w - nx;
-      x = nx;
-    }
-    if (mode.includes('e')) {
-      w = Math.min(1 - crop.x, Math.max(min, crop.w + stepX));
-    }
-    if (mode.includes('n')) {
-      const ny = Math.min(crop.y + crop.h - min, Math.max(0, crop.y + stepY));
-      h = crop.y + crop.h - ny;
-      y = ny;
-    }
-    if (mode.includes('s')) {
-      h = Math.min(1 - crop.y, Math.max(min, crop.h + stepY));
-    }
-
-    // Respect an aspect lock by deriving the missing dimension.
-    if (ratio && rect.width && rect.height) {
-      const imgRatio = engine.negative.width / engine.negative.height;
-      const targetW = h * ratio / imgRatio;
-      if (mode === 'n' || mode === 's') {
-        const cx = x + w / 2;
-        w = Math.min(1, targetW);
-        x = Math.max(0, Math.min(1 - w, cx - w / 2));
-      } else {
-        const targetH = (w * imgRatio) / ratio;
-        const cy = y + h / 2;
-        h = Math.min(1, targetH);
-        y = Math.max(0, Math.min(1 - h, cy - h / 2));
-      }
-    }
-  }
-
-  cropDrag.current = { x, y, w, h };
-  paintCropOverlay({ x, y, w, h });
+  const next = resizePrintRect(rect, mode, dx, dy, ratio, printRatio);
+  cropDrag.current = next;
+  paintCropRect(next);
 });
 
 function endCropDrag() {
@@ -937,36 +1078,40 @@ function endCropDrag() {
   const next = cropDrag.current;
   cropDrag = null;
   cropLayer.classList.remove('dragging');
-  if (next) {
-    const frame = state.params.frame;
-    frame.crop = next;
-    applyFrame(frame);
-    updateFrameReadout();
-  }
+  if (!next) return;
+
+  const frame = state.params.frame;
+  frame.crop = printRectToCrop(next, orientationOnly(frame));
+  // Carry the straighten angle across: it belongs to the frame, and the
+  // preview is showing it already.
+  applyFrame(frame);
+  repaintCrop();
+  updateFrameReadout();
 }
 
 cropLayer.addEventListener('pointerup', endCropDrag);
 cropLayer.addEventListener('pointercancel', endCropDrag);
 
-/** Position the crop chrome over the print, in stage coordinates. */
-function paintCropOverlay(crop) {
+/** Repaint the overlay from current state. Safe to call at any time. */
+function repaintCrop() {
   if (!state.cropMode || !engine.loaded) return;
-  const c = crop || state.params.frame.crop;
+  paintCropRect(currentPrintCrop());
+}
 
-  const stageRect = stageFrame.getBoundingClientRect();
-  const viewRect = view.getBoundingClientRect();
-  if (!viewRect.width || !viewRect.height) return;
-
-  const left = viewRect.left - stageRect.left;
-  const top = viewRect.top - stageRect.top;
-
-  const x = left + c.x * viewRect.width;
-  const y = top + c.y * viewRect.height;
-  const w = c.w * viewRect.width;
-  const h = c.h * viewRect.height;
-
+/** Position the crop chrome over the print, given a print-space rectangle. */
+function paintCropRect(rect) {
+  if (!state.cropMode || !engine.loaded) return;
   const frameEl = cropLayer.querySelector('.crop-frame');
   if (!frameEl) return;
+
+  const box = printRect();
+  if (!box.width || !box.height) return;
+
+  const x = box.left + rect.x * box.width;
+  const y = box.top + rect.y * box.height;
+  const w = rect.w * box.width;
+  const h = rect.h * box.height;
+
   frameEl.style.left = `${x}px`;
   frameEl.style.top = `${y}px`;
   frameEl.style.width = `${w}px`;
@@ -980,10 +1125,21 @@ function paintCropOverlay(crop) {
     node.style.width = `${Math.max(0, ww)}px`;
     node.style.height = `${Math.max(0, hh)}px`;
   };
-  set(shades[0], 0, 0, stageRect.width, y);                                   // north
-  set(shades[1], 0, y + h, stageRect.width, stageRect.height - (y + h));       // south
-  set(shades[2], 0, y, x, h);                                                 // west
-  set(shades[3], x + w, y, stageRect.width - (x + w), h);                     // east
+  set(shades[0], 0, 0, box.stage.width, y);                                   // north
+  set(shades[1], 0, y + h, box.stage.width, box.stage.height - (y + h));      // south
+  set(shades[2], 0, y, x, h);                                                // west
+  set(shades[3], x + w, y, box.stage.width - (x + w), h);                    // east
+
+  // Readout on the frame itself: the aspect is the thing the user is
+  // manipulating, so it belongs where the eye already is.
+  const label = cropLayer.querySelector('.crop-label');
+  if (label) {
+    const pxW = Math.round(rect.w * frameSize(
+      { ...state.params.frame, crop: { x: 0, y: 0, w: 1, h: 1 } }, engine.negative).width);
+    const pxH = Math.round(rect.h * frameSize(
+      { ...state.params.frame, crop: { x: 0, y: 0, w: 1, h: 1 } }, engine.negative).height);
+    label.textContent = `${pxW} × ${pxH}`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1534,6 +1690,9 @@ const TYPING = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (modals.closeTop()) return;
+    // Crop mode comes first: it has its own meaning for Escape (revert the
+    // window), and the generic handler must not swallow it.
+    if (state.cropMode) { event.preventDefault(); cancelCrop(); return; }
     if (state.brush) { toggleBrush(false); return; }
     stopCompare();
     return;
@@ -1555,7 +1714,7 @@ window.addEventListener('keydown', (event) => {
   // Crop mode owns Enter and Escape.
   if (state.cropMode) {
     if (event.key === 'Enter') { event.preventDefault(); toggleCropMode(false); return; }
-    if (event.key === 'Escape') { event.preventDefault(); toggleCropMode(false); return; }
+    if (event.key === 'Escape') { event.preventDefault(); cancelCrop(); return; }
     return;
   }
 
@@ -1645,6 +1804,7 @@ window.addEventListener('resize', () => {
     if (!engine.loaded) return;
     layoutView();
     render();
+    repaintCrop();
   }, 120);
 });
 

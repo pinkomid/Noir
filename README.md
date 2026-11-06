@@ -56,6 +56,17 @@ neutral mat so you are judging the photograph, not the UI.
 
 ### Crop & transform
 
+Crop mode shows the **whole photograph**, with the crop window drawn on top —
+you can only pull the window outwards if the pixels outside it are still
+there. Drag inside the frame to move it, drag a handle to resize it. Changing
+**Aspect** reshapes the window immediately, and the lock holds while you
+drag. <kbd>Enter</kbd> keeps the crop, <kbd>Esc</kbd> puts it back.
+
+Cropping never stretches: it changes which window of the negative you are
+printing, and the print's pixel size follows from that window.
+
+
+
 - **Crop** — drag the frame or any of its eight handles, with rule-of-thirds
   guides. <kbd>Enter</kbd> applies, <kbd>Esc</kbd> cancels.
 - **Aspect lock** — Free, Original, 1:1, 4:5, 5:4, 3:2, 2:3, 16:9, Scope. The
@@ -178,9 +189,10 @@ npm run build && node tools/test-deploy.mjs
 
 - `test-engine.mjs` — 71 checks: tonal math, grain, toning, export, the monotone
   curve (including a monotonicity sweep), the dodge/burn mask, and the ZIP writer
-- `test-ui.mjs` — 99 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-ui.mjs` — 114 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
-  panel tabs, light/dark theme, reset, keyboard
+  panel tabs, crop overlay geometry, aspect lock while dragging, crop
+  cancel, light/dark theme, reset, keyboard
 - `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
   contains no root-absolute paths, and publishes no test tooling
 
