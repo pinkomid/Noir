@@ -31,6 +31,7 @@ jobs:
           cp index.html _site/
           cp -r styles _site/
           cp -r js _site/
+          cp -r project _site/
           cp -r assets _site/
           # No Jekyll processing — we serve the files exactly as written.
           touch _site/.nojekyll
@@ -46,6 +47,9 @@ jobs:
           test -f _site/index.html
           test -f _site/js/app.js
           test -f _site/styles/main.css
+          test -f _site/styles/profile.css
+          test -f _site/project/shell.js
+          test -f _site/project/profile/panel.js
           echo "Site assembled: $(find _site -type f | wc -l) files"
 
       - uses: actions/upload-pages-artifact@v3

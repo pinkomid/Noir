@@ -1,10 +1,17 @@
-# NOIR Photo Studio
+# NOIR Studio
 
-A private, in-browser black & white darkroom. Drop in a photograph, choose a film
-stock, and develop a finished monochrome print — then export it at full resolution.
+Two tools in one workspace:
 
-Every pixel is processed on your own device with the Canvas API. **Nothing is
-uploaded**; there is no backend, no account, and no tracking.
+- **Photo editor** (right) — a private, in-browser black & white darkroom. Drop in
+  a photograph, choose a film stock, and develop a finished monochrome print, then
+  export it at full resolution.
+- **Profile editor** (left) — builds a biography for **3DXChat**, checked against
+  that editor's own rules before you paste it: only `b`, `i`, `color` and `size`
+  tags, balanced and nested correctly, 1000 characters counting line breaks.
+
+Everything runs on your own device. **Nothing is uploaded**; there is no backend,
+no account, and no tracking. The profile draft is saved in `localStorage` on this
+machine only.
 
 ![Preset sheet](tools/out/preset-sheet.png)
 
@@ -46,6 +53,57 @@ Pick one and keep adjusting — nothing is baked in.
 | PLATINUM | Alt-process matte, compressed highlights |
 | CYANOTYPE | Prussian-blue print, flat and dreamy |
 | CARBON | Hard structural contrast, cool cast |
+
+## The profile editor
+
+Left pane. It composes 3DXChat profile text and refuses to hand you anything the
+game would reject.
+
+### Why it is stricter than a text box
+
+The 3DXChat profile field is not a browser: it accepts only `<b>`, `<i>`,
+`<color>` and `<size>`, requires tags to be balanced and properly nested, counts
+every tag character against **1000**, and shows a replacement box for glyphs its
+font lacks. Text that looks perfect in a browser can be rejected outright on
+paste, so the checks run before you copy:
+
+| Check | What it catches |
+| --- | --- |
+| Tag balance and nesting | `<b><i>x</b></i>` is rejected by the game |
+| Allowed tags | `<u>`, `<align>` and friends are not supported |
+| Colour values | an unknown name is silently rendered white, which looks fine and is wrong |
+| Character count | characters **plus line breaks** — a CRLF costs two, so a plain length is wrong |
+| Glyph safety | supplementary-plane characters (emoji, gothic `𝔏𝔬𝔳𝔢𝔶`) and BMP glyphs missing from the client font such as `⛧` |
+
+### Layout
+
+- **Identity** — name (32 limit, tracked), pronouns, orientation, languages.
+- **Personality** — four sliders. They only emit a word at 2 and 4, so a quiet
+  profile stays quiet instead of being padded with adjectives.
+- **Lines** — greetings, limits and a signature line, one per line or free text.
+- **Style** — font, palette, frame, accent marker, and switches for centring and
+  colour.
+- **Templates** — four starting points, including the dark gothic reference this
+  is modelled on.
+
+The preview on the right of the pane shows the text as the game will draw it, with
+the counter and the problem list underneath. **Copy** is disabled while anything
+would fail.
+
+### Centring without `<align>`
+
+The game has no align tag. Centring is done the only way it accepts: real leading
+spaces. That means padding has to be computed from the **visible** length of each
+line — measuring `<color=#d9a55f>name</color>` as 31 characters instead of 4 puts
+every coloured line off-centre. The pane measures itself and recomposes, so the
+profile stays centred in a narrow pane as well as a wide one.
+
+### Glyph safety is not just "outside the BMP"
+
+Being inside the Basic Multilingual Plane is necessary, not sufficient. `⛧`
+(U+26E7) is in the plane and still renders as a box in the client, so the check
+keeps a list of BMP codepoints the font is known to be missing. Every frame and
+accent shipped here passes it.
 
 ### On a phone
 
@@ -198,8 +256,11 @@ draft buffer for responsiveness, then a full-quality pass on release.
 ### Source layout
 
 ```
-index.html            markup and dialogs
-styles/main.css       the entire design system
+index.html            the split workspace: both panes, one entry point
+project/shell.js      boots NOIR inside the right pane, wires the split
+project/profile/      the profile editor: data, compose, validate, panel
+styles/profile.css    the split layout and the profile pane
+styles/main.css       NOIR's design system
 js/engine.js          canvas pipeline: LUT, grain field, toning, histogram
 js/fx.js              graphic effects: threshold, halftone, dither, xerox, riso
 js/presets.js         the darkroom stocks and the graphic lab
@@ -208,9 +269,14 @@ js/ui.js              DOM builders: rail, panel, curve editor, histogram, modals
 js/batch.js           batch runner and a dependency-free ZIP writer
 js/app.js             state, history, view, brush, export, keyboard
 tools/test-engine.mjs headless checks: pipeline, curve, mask, ZIP
+tools/test-profile.mjs the profile editor's compose and validation rules
 tools/test-ui.mjs     boots the real UI in jsdom and drives the user journeys
 tools/test-deploy.mjs verifies the Pages build is self-contained
 ```
+
+`js/app.js` is imported by `project/shell.js` rather than loaded by its own
+script tag, so there is exactly one entry point and the darkroom cannot boot
+twice.
 
 ---
 
@@ -220,7 +286,7 @@ The engine is verified against real pixels, including a rendered proof sheet.
 
 ```bash
 npm i -D @napi-rs/canvas jsdom
-npm test                        # engine + UI suites
+npm test                        # engine + profile + UI suites
 npm run build && node tools/test-deploy.mjs
 ```
 
@@ -228,14 +294,23 @@ npm run build && node tools/test-deploy.mjs
   curve (including a monotonicity sweep), the dodge/burn mask, the ZIP writer,
   and the graphic effects (each one must leave both ink and paper and must
   modulate with the image rather than render a uniform screen)
-- `test-ui.mjs` — 161 checks: boot, loading, sliders, undo/redo, compare, zoom,
+- `test-profile.mjs` — 72 checks: font maps, palette and frame integrity, line
+  centring on visible text, wrapping, trait words, tag balance and nesting,
+  colour values, the counting rule, the 1000 boundary, and glyph safety for both
+  supplementary-plane characters and BMP glyphs the client font lacks. Every
+  font, palette, frame and template must compose to something valid.
+- `test-ui.mjs` — 200 checks: boot, loading, sliders, undo/redo, compare, zoom,
   crop handles, rotation, mirror, straighten, aspect lock, export download,
   panel tabs, crop overlay geometry, aspect lock while dragging, crop
   cancel, the aspect lock staying in sync with its control, the effects tab
   and its menu, loading a graphic stock, pinch to zoom, painting with a
-  fingertip, the phone layout's CSS contract, light/dark theme, reset, keyboard
-- `test-deploy.mjs` — 18 checks: the Pages build ships every referenced file,
-  contains no root-absolute paths, and publishes no test tooling
+  fingertip, the phone layout's CSS contract, the split workspace and pane
+  switcher, driving the profile form end to end (preview, counters, palette,
+  frame, font, colour and centring switches, templates, draft persistence,
+  reset), light/dark theme, reset, keyboard
+- `test-deploy.mjs` — 25 checks: the Pages build ships every referenced file
+  including the whole `project/` tree, contains no root-absolute paths, has a
+  single module entry point, and publishes no test tooling or zip uploads
 
 `test-engine.mjs` also writes `tools/out/preset-sheet.png` and a full-resolution
 export, so visual regressions are easy to spot.
