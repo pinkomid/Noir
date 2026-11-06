@@ -1253,6 +1253,41 @@ check('the worked example is prefilled rather than blank',
 check('the page exposes its composed text', typeof profileApi?.text === 'string' && profileApi.text.length > 0);
 check('the composed profile is valid for the game', inspectReport(profileApi.text).ok);
 
+// The sliders must show their value, not just a thumb on nothing.
+check('each personality slider reports where it is on its range', (() => {
+  const sliders = ['#ppSoft', '#ppShy', '#ppMoody', '#ppWarm']
+    .map((sel) => profileRoot.querySelector(sel));
+  return sliders.every((input) => /^\d+(\.\d+)?%$/.test(input.style.getPropertyValue('--fill')));
+})(), 'the track gradient is driven by --fill; without it only the thumb is visible');
+
+check('the fill matches the slider\'s own value', (() => {
+  const input = profileRoot.querySelector('#ppShy');
+  const value = Number(input.value);
+  const max = Number(input.max);
+  return input.style.getPropertyValue('--fill') === `${((value / max) * 100).toFixed(2)}%`;
+})(), 'a fill that does not track the value is worse than none');
+
+check('moving a slider updates its fill', (() => {
+  const input = profileRoot.querySelector('#ppSoft');
+  const before = input.style.getPropertyValue('--fill');
+  input.value = input.max;
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  const after = input.style.getPropertyValue('--fill');
+  input.value = '2';
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  return before !== after && after === '100.00%';
+})(), 'the fill is set once at render time unless input is handled');
+
+check('the slider readout matches the value', (() => {
+  const input = profileRoot.querySelector('#ppSoft');
+  return input.parentElement.querySelector('output').textContent === input.value;
+})());
+
+check('the sliders are labelled 0–5', (() => {
+  const ticks = profileRoot.querySelector('.pp-ticks');
+  return Boolean(ticks) && ticks.querySelectorAll('span').length === 6;
+})(), 'an unlabelled range does not say what its scale is');
+
 // profile/page.js keeps the tab title in step. Its own page cannot be booted
 // here (the harness is bound to photo.html), so the rule is asserted directly:
 // a tab that says "Profile editor" while the profile is named something else

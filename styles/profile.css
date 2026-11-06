@@ -240,23 +240,112 @@ body.profile-page {
 
 .pp-slider {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 22px;
+  grid-template-columns: 58px minmax(0, 1fr) 20px;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-  font-size: 11px;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 11.5px;
   color: var(--text-dim);
 }
 
+/* ---- Sliders -------------------------------------------------------
+   A 3px line at 30% opacity was invisible against the panel, leaving only
+   the thumb — which reads as a stray dot rather than a value. The track is
+   thicker, the unfilled part is a real colour, and the filled part is drawn
+   with --fill (set from JS) so you can see where you are on the range.
+   -------------------------------------------------------------------- */
+
 .pp-slider input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  accent-color: var(--accent);
-  height: 22px;
+  height: 26px;
+  margin: 0;
+  background: transparent;
+  cursor: ew-resize;
+  /* The whole control is the hit area, not just the 6px line. */
+  touch-action: pan-y;
+}
+
+.pp-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background:
+    linear-gradient(90deg,
+      var(--accent) 0%,
+      var(--accent) var(--fill, 0%),
+      var(--track) var(--fill, 0%),
+      var(--track) 100%);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.pp-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  /* Centre on the 6px track: (16 - 6) / 2. */
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--thumb);
+  border: 1px solid var(--thumb-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  transition: transform 0.12s var(--ease, ease), background 0.12s var(--ease, ease);
+}
+
+.pp-slider input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
+
+.pp-slider input[type="range"]:active::-webkit-slider-thumb,
+.pp-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pp-slider input[type="range"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Firefox draws its own track and progress bar, and cannot use the gradient
+   above, so the fill is expressed as a progress element instead. */
+.pp-slider input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.pp-slider input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.pp-slider input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--thumb);
+  border: 1px solid var(--thumb-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+
+/* The datalist is what makes the browser draw its own tick marks; this row
+   labels the same positions below the control. */
+.pp-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 32px 8px 70px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 .pp-slider output {
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text);
   text-align: right;
 }
@@ -509,10 +598,23 @@ body.profile-page {
 
   .pp-preview { min-height: 140px; }
 
-  /* Touch targets. */
+  /* Touch targets. A fingertip needs ~44px and a 16px thumb is a hard grab
+     on glass, so the control grows and the thumb with it. */
   .pp-btn { min-height: 44px; }
   .pp-template { min-height: 40px; }
-  .pp-slider input[type="range"] { height: 34px; }
+  .pp-slider input[type="range"] { height: 44px; }
+  .pp-slider input[type="range"]::-webkit-slider-runnable-track { height: 8px; }
+  .pp-slider input[type="range"]::-moz-range-track { height: 8px; }
+  .pp-slider input[type="range"]::-moz-range-progress { height: 8px; }
+  .pp-slider input[type="range"]::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+    margin-top: -7px;
+  }
+  .pp-slider input[type="range"]::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+  }
   .pp-check input { width: 20px; height: 20px; }
   .pp-field select,
   .pp-field input[type="text"] { min-height: 44px; }

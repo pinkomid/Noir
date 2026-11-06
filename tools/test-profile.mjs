@@ -15,6 +15,7 @@
  *   node tools/test-profile.mjs
  */
 
+import { readFileSync } from 'node:fs';
 import { compose, centre, toFont, wrapWords, wrapText, divider, describeTraits } from '../project/profile/compose.js';
 import { inspect, checkTags, countedLength, riskyGlyphs, isColour, visibleLength, stripTags, LIMITS } from '../project/profile/validate.js';
 import { FONTS, FONT_ORDER, PALETTES, PALETTE_ORDER, FRAMES, FRAME_BY_ID, ACCENTS, ACCENT_ORDER, DEFAULT_FIELDS, TEMPLATES } from '../project/profile/data.js';
@@ -285,6 +286,66 @@ check('stripTags returns the text alone', stripTags('<b>hi</b>') === 'hi');
 
 check('every problem carries a line number',
   checkTags('x\n<b>hi').every((p) => typeof p.line === 'number'));
+
+/* ---- 7. Slider presentation ----------------------------------------- */
+
+/*
+ * A slider whose track paints nothing looks like a stray dot: you cannot tell
+ * it is a range, cannot see the current value, and cannot aim. These checks
+ * exist because exactly that shipped — the dark theme's track token referred
+ * to itself, which is invalid at computed-value time, so `background:
+ * var(--track)` resolved to nothing and only the thumb was visible.
+ */
+
+console.log('\nSlider presentation:');
+
+const mainCss = readFileSync(new URL('../styles/main.css', import.meta.url), 'utf8');
+const paneCss = readFileSync(new URL('../styles/profile.css', import.meta.url), 'utf8');
+
+check('no custom property refers to itself',
+  !/--([a-z-]+):\s*var\(--\1\)/.test(mainCss) && !/--([a-z-]+):\s*var\(--\1\)/.test(paneCss),
+  'a self-referencing token is invalid at computed-value time and paints nothing');
+
+check('the dark theme track resolves to a colour', (() => {
+  // The dark block is the first :root; the light one comes later.
+  const dark = mainCss.slice(0, mainCss.indexOf('[data-theme="light"]'));
+  const value = /--track:\s*([^;]+);/.exec(dark)?.[1].trim();
+  return Boolean(value) && (/^#[0-9a-f]{3,8}$/i.test(value) || /^rgba?\(/.test(value));
+})(), 'this is the bug that made every slider in the darkroom one floating dot');
+
+check('the light theme track resolves to a colour', (() => {
+  const light = mainCss.slice(mainCss.indexOf('[data-theme="light"]'));
+  const value = /--track:\s*([^;]+);/.exec(light)?.[1].trim();
+  return Boolean(value) && (/^#[0-9a-f]{3,8}$/i.test(value) || /^rgba?\(/.test(value));
+})());
+
+check('the profile slider draws a filled track', /--fill/.test(paneCss),
+  'without the gradient the thumb is the only thing visible');
+
+check('the profile slider track is thick enough to see',
+  (() => {
+    const height = Number(/::-webkit-slider-runnable-track\s*\{[^}]*height:\s*(\d+)px/.exec(paneCss)?.[1]);
+    return height >= 5;
+  })(), 'a 3px line on a dark panel disappears');
+
+check('the profile slider has a real thumb',
+  Number(/::-webkit-slider-thumb\s*\{[^}]*width:\s*(\d+)px/.exec(paneCss)?.[1]) >= 14);
+
+check('Firefox gets its own track and progress rules',
+  /::-moz-range-track/.test(paneCss) && /::-moz-range-progress/.test(paneCss),
+  'the webkit gradient does not apply there');
+
+check('the sliders are labelled 0–5', /class="pp-ticks"/.test(
+  readFileSync(new URL('../project/profile/panel.js', import.meta.url), 'utf8')));
+
+check('the touch thumb grows with the control', (() => {
+  const touch = paneCss.slice(paneCss.indexOf('@media (max-width: 900px)'));
+  return /::-webkit-slider-thumb\s*\{[^}]*width:\s*22px/.test(touch);
+})(), 'a 16px dot is a hard grab on glass');
+
+check('NOIR\'s own sliders share the fixed track token',
+  /input\[type="range"\]::-webkit-slider-runnable-track/.test(mainCss),
+  'one token, every slider — the fix has to reach the darkroom too');
 
 /* ---- Summary -------------------------------------------------------- */
 

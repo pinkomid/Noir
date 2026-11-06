@@ -94,11 +94,15 @@ export function initProfilePanel(root) {
 
       <div class="pp-section">
         <h3>Personality <em id="ppTraitWords"></em></h3>
-        <label class="pp-slider"><span>Soft</span><input type="range" id="ppSoft" min="0" max="5" /><output></output></label>
-        <label class="pp-slider"><span>Shy</span><input type="range" id="ppShy" min="0" max="5" /><output></output></label>
-        <label class="pp-slider"><span>Moody</span><input type="range" id="ppMoody" min="0" max="5" /><output></output></label>
-        <label class="pp-slider"><span>Warm</span><input type="range" id="ppWarm" min="0" max="5" /><output></output></label>
-        <p class="pp-hint">Sliders only emit words at 2 and 4, so a quiet profile stays quiet.</p>
+        <!-- The tick row is what tells you these are 0–5 and not a continuous
+             dial: a bare dot on an invisible track reads as neither. -->
+        <div class="pp-slider"><span>Soft</span><input type="range" id="ppSoft" min="0" max="5" step="1" list="ppTicks" aria-label="Soft" /><output></output></div>
+        <div class="pp-slider"><span>Shy</span><input type="range" id="ppShy" min="0" max="5" step="1" list="ppTicks" aria-label="Shy" /><output></output></div>
+        <div class="pp-slider"><span>Moody</span><input type="range" id="ppMoody" min="0" max="5" step="1" list="ppTicks" aria-label="Moody" /><output></output></div>
+        <div class="pp-slider"><span>Warm</span><input type="range" id="ppWarm" min="0" max="5" step="1" list="ppTicks" aria-label="Warm" /><output></output></div>
+        <datalist id="ppTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option><option value="4"></option><option value="5"></option></datalist>
+        <div class="pp-ticks" aria-hidden="true"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
+        <p class="pp-hint">Each slider is 0–5. They only emit words at 2 and 4, so a quiet profile stays quiet.</p>
       </div>
 
       <div class="pp-section">
@@ -361,9 +365,7 @@ export function initProfilePanel(root) {
   }
   // Sliders should also update their own readout immediately.
   for (const key of ['soft', 'shy', 'moody', 'warm']) {
-    inputs[key].addEventListener('input', () => {
-      inputs[key].nextElementSibling.textContent = inputs[key].value;
-    });
+    inputs[key].addEventListener('input', () => paintSlider(inputs[key]));
   }
 
   templatesEl.addEventListener('click', (event) => {
@@ -377,10 +379,25 @@ export function initProfilePanel(root) {
     syncSliderOutputs();
   });
 
+  /**
+   * Set a slider's readout and the width of its filled track.
+   *
+   * `--fill` drives the gradient in the stylesheet. Without it the track is
+   * one flat colour and the only thing you can see is the thumb, which looks
+   * like a stray dot rather than a value.
+   */
+  function paintSlider(input) {
+    const min = Number(input.min) || 0;
+    const max = Number(input.max) || 100;
+    const value = Number(input.value);
+    const ratio = max === min ? 0 : (value - min) / (max - min);
+
+    input.style.setProperty('--fill', `${(ratio * 100).toFixed(2)}%`);
+    input.parentElement.querySelector('output').textContent = String(value);
+  }
+
   function syncSliderOutputs() {
-    for (const key of ['soft', 'shy', 'moody', 'warm']) {
-      inputs[key].nextElementSibling.textContent = inputs[key].value;
-    }
+    for (const key of ['soft', 'shy', 'moody', 'warm']) paintSlider(inputs[key]);
   }
 
   async function copy() {

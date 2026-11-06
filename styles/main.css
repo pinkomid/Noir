@@ -35,7 +35,7 @@
   --line: rgba(234, 229, 219, 0.09);
   --line-strong: rgba(234, 229, 219, 0.16);
   --line-hover: rgba(234, 229, 219, 0.26);
-  --track: var(--track);
+  --track: rgba(234, 229, 219, 0.17);
 
   /* ---- Solid controls ---- */
   --btn-bg-1: #1c1c20;
